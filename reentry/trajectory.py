@@ -110,8 +110,39 @@ class TrajectoryResult:
         return f(self.rho, V, vehicle.nose_radius)
 
     def heat_load(self, vehicle, correlation="sutton-graves") -> float:
-        """Интегральный тепловой поток, Дж/м^2. Именно он греет материал."""
+        """Интегральный поток в точке торможения, Дж/м^2.
+
+        ВНИМАНИЕ: это НЕ прокси абляционной массы. Масса определяется полной
+        поглощённой энергией absorbed_energy(), а она зависит от площади,
+        которая связана с Rn. По q_stag знак зависимости от Rn обратный
+        правильному. Величина оставлена как диагностическая.
+        """
         return float(np.trapezoid(self.heat_flux(vehicle, correlation), self.t))
+
+    def absorbed_power(self, vehicle, correlation="sutton-graves",
+                       T_wall=None) -> np.ndarray:
+        """Полная поглощаемая мощность вдоль траектории, Вт."""
+        from .heating import absorbed_power, hot_wall_factor
+        q = self.heat_flux(vehicle, correlation)
+        if T_wall is not None:
+            V = self.V_rel if self.V_rel is not None else self.V
+            q = q * hot_wall_factor(V, T_wall)
+        return absorbed_power(q, vehicle.wetted)
+
+    def absorbed_energy(self, vehicle, correlation="sutton-graves",
+                        T_wall=None) -> float:
+        """Полная поглощённая энергия за вход, Дж. ЭТО прокси массы уноса."""
+        return float(np.trapezoid(
+            self.absorbed_power(vehicle, correlation, T_wall), self.t))
+
+    def specific_energy(self, vehicle, correlation="sutton-graves",
+                        T_wall=None) -> float:
+        """Поглощённая энергия на килограмм, Дж/кг.
+
+        Величина, которую надо сравнивать с эффективной энтальпией абляции:
+        именно она решает, испарится материал или только прогреется.
+        """
+        return self.absorbed_energy(vehicle, correlation, T_wall) / vehicle.mass
 
     def peak_heating(self):
         """(h [м], V [м/с], t [с]) в точке максимума sqrt(rho)*V^3."""

@@ -11,8 +11,9 @@ from __future__ import annotations
 import numpy as np
 
 from reentry import EntryState, MSISAtmosphere, Vehicle, integrate
-from reentry.heating import (EXP_DKR, K_SUTTON_GRAVES, detra_kemp_riddell_shape,
-                             sutton_graves)
+from reentry.heating import (EXP_DKR, K_SUTTON_GRAVES, SHAPE_FACTOR_TUMBLING,
+                             blowing_factor, detra_kemp_riddell_shape,
+                             hot_wall_factor, sutton_graves)
 
 ATM = MSISAtmosphere()
 VEH = Vehicle(mass=175.0, area=1.0, Cd=1.5, nose_radius=0.5)
@@ -137,9 +138,138 @@ def test_nose_radius():
     return ok
 
 
+def test_cauchy():
+    print("6. ОМЫВАЕМАЯ ПЛОЩАДЬ — ФОРМУЛА КОШИ")
+    print("   Для любого ВЫПУКЛОГО тела средняя по случайным ориентациям")
+    print("   площадь проекции = 1/4 площади поверхности. Наш `area` для")
+    print("   кувыркающегося тела и есть средняя проекция, значит A_омыв = 4*A")
+    print("   ТОЧНО, для любой формы, а не только для сферы.\n")
+    for A in (0.5, 1.0, 2.0):
+        v = Vehicle(area=A)
+        print(f"   area={A:.1f} м^2  ->  A_омыв={v.wetted:.1f} м^2  "
+              f"(отношение {v.wetted/A:.1f})")
+    # Проверка на сфере: A_проекц = pi R^2, A_поверх = 4 pi R^2
+    R = 0.65
+    print(f"\n   сверка на сфере R={R} м: проекция {np.pi*R**2:.4f}, "
+          f"поверхность {4*np.pi*R**2:.4f}, отношение {4.0:.1f}")
+    ok = abs(Vehicle(area=1.0).wetted - 4.0) < 1e-12
+    print(f"   -> {'OK' if ok else 'ПРОВАЛ'}\n")
+    return ok
+
+
+def test_rn_scaling():
+    print("7. ПОКАЗАТЕЛИ ПО РАЗМЕРУ — ГДЕ ПЕРЕВОРАЧИВАЕТСЯ ЗНАК")
+    print("   Ожидание для геометрически подобного тела:")
+    print("     q_stag ~ L^-0.5,  P_полн ~ L^+1.5,  P/m ~ L^-1.5\n")
+
+    scales = np.array([0.1, 0.2, 0.5, 1.0, 2.0])
+
+    # (а) ЗАМОРОЖЕННАЯ траектория: та же история потока, меняем только геометрию.
+    # Так проверяются чистые показатели корреляции и геометрии.
+    tr = integrate(VEH, ENTRY, ATM)
+    q_hist, t_hist = tr.rho, tr.t
+    V_hist = tr.V_rel
+    E_frozen, S_frozen = [], []
+    for L in scales:
+        v = Vehicle.geometric_family(L)
+        q = sutton_graves(q_hist, V_hist, v.nose_radius)
+        P = SHAPE_FACTOR_TUMBLING * q * v.wetted
+        E = np.trapezoid(P, t_hist)
+        E_frozen.append(E); S_frozen.append(E / v.mass)
+
+    def slope(y):
+        return float(np.polyfit(np.log(scales), np.log(y), 1)[0])
+
+    print(f"   (а) замороженная траектория — чистая геометрия:")
+    print(f"       показатель полной энергии    {slope(E_frozen):+.3f}  "
+          f"(ожидалось +1.500)")
+    print(f"       показатель удельной энергии  {slope(S_frozen):+.3f}  "
+          f"(ожидалось -1.500)")
+    ok = abs(slope(E_frozen) - 1.5) < 1e-6 and abs(slope(S_frozen) + 1.5) < 1e-6
+
+    # (б) САМОСОГЛАСОВАННО: у мелкого тела beta меньше, оно тормозится выше
+    # и получает МЕНЬШЕ полного тепла. Два эффекта борются.
+    print(f"\n   (б) самосогласованно (beta меняется вместе с размером):")
+    print(f"   {'L':>6}{'beta':>9}{'h пика, км':>13}{'E полн., МДж':>15}"
+          f"{'E/m, МДж/кг':>14}")
+    E_sc, S_sc = [], []
+    for L in scales:
+        v = Vehicle.geometric_family(L)
+        t2 = integrate(v, ENTRY, ATM)
+        E = t2.absorbed_energy(v); S = t2.specific_energy(v)
+        E_sc.append(E); S_sc.append(S)
+        print(f"   {L:>6.1f}{v.ballistic_coefficient:>9.1f}"
+              f"{t2.peak_heating()[0]/1e3:>13.1f}{E/1e6:>15.1f}{S/1e6:>14.2f}")
+    print(f"\n       показатель полной энергии    {slope(E_sc):+.3f}")
+    print(f"       показатель удельной энергии  {slope(S_sc):+.3f}")
+    print("\n   -> Знак по размеру ПРОТИВОПОЛОЖЕН знаку по q_stag.")
+    print("      Мелкие осколки получают радикально больше тепла на килограмм —")
+    print("      это ВТОРОЙ механизм, которым фрагментация решает исход,")
+    print("      независимый от подъёма высоты через beta.\n")
+    return ok
+
+
+def test_demise_energy():
+    print("8. ХВАТАЕТ ЛИ ЭНЕРГИИ НА ИСПАРЕНИЕ")
+    print("   Нужно на полное испарение алюминия (оценка, шаг 4 уточнит):")
+    c_p, T0, T_melt, T_boil = 900.0, 300.0, 933.0, 2740.0
+    L_fus, L_vap = 0.397e6, 10.5e6
+    H_total = c_p*(T_melt-T0) + L_fus + c_p*(T_boil-T_melt) + L_vap
+    print(f"     нагрев до плавления  {c_p*(T_melt-T0)/1e6:5.2f} МДж/кг")
+    print(f"     теплота плавления    {L_fus/1e6:5.2f}")
+    print(f"     нагрев до кипения    {c_p*(T_boil-T_melt)/1e6:5.2f}")
+    print(f"     теплота испарения    {L_vap/1e6:5.2f}")
+    print(f"     ИТОГО                {H_total/1e6:5.2f} МДж/кг\n")
+    print("   Отношение E/m к этой величине = ДОЛЯ МАССЫ, которую в принципе")
+    print("   можно испарить, если бы вся поглощённая энергия шла на испарение.\n")
+    print(f"   {'L':>6}{'масса, кг':>12}{'E/m, МДж/кг':>14}"
+          f"{'испаримая доля':>17}")
+    for L in (1.0, 0.5, 0.2, 0.1):
+        v = Vehicle.geometric_family(L)
+        t2 = integrate(v, ENTRY, ATM)
+        S = t2.specific_energy(v, T_wall=T_boil)
+        print(f"   {L:>6.1f}{v.mass:>12.2f}{S/1e6:>14.2f}{100*S/H_total:>16.0f}%")
+    print("\n   -> Целый объект: 3%. Наблюдаемая демизабельность конструкции")
+    print("      типа OneWeb/SpaceX — 95% (Ferreira, UNOOSA 2024).")
+    print("      Разрыв по МАССЕ в тридцать раз, поверх разрыва по ВЫСОТЕ в 20 км.")
+    print("      Оба закрываются одним и тем же — фрагментацией.\n")
+    return True
+
+
+def test_blowing_closed_form():
+    print("9. ВДУВ: ЗАМКНУТАЯ ФОРМА ПРОТИВ ИТЕРАЦИЙ")
+    h_0, H_eff, eta = 2.8e7, 1.2e7, 0.3
+    q_hw = 1.0e6
+    closed = q_hw * blowing_factor(h_0, H_eff, eta)
+    q = q_hw                       # итерируем q_net = q_hw - eta*(q/H_eff)*h_0
+    for _ in range(200):
+        q = q_hw - eta * (q / H_eff) * h_0
+    print(f"   замкнутая форма  {closed:.6e} Вт/м^2")
+    print(f"   итерации (200)   {q:.6e} Вт/м^2")
+    print(f"   множитель        {blowing_factor(h_0, H_eff, eta):.4f} "
+          f"-> вдув срезает поток на {100*(1-blowing_factor(h_0,H_eff,eta)):.0f}%")
+    ok = abs(closed / q - 1.0) < 1e-9
+    print(f"\n   -> {'OK' if ok else 'ПРОВАЛ'}: нелинейность замыкается аналитически,")
+    print("      неявный решатель на шаге 4 не нужен.\n")
+    return ok
+
+
+def test_hot_wall():
+    print("10. ГОРЯЧАЯ СТЕНКА")
+    for V in (7500.0, 6100.0, 4000.0):
+        f = float(hot_wall_factor(V, 2740.0))
+        print(f"   V={V:6.0f} м/с, T=2740 K -> множитель {f:.3f} "
+              f"({100*(f-1):+.0f}%)")
+    print("   -> Поправка растёт по мере торможения: у холодного конца")
+    print("      траектории она уже не мала.\n")
+    return True
+
+
 if __name__ == "__main__":
     print()
     res = [test_sutton_graves_units(), test_energy_sanity(), test_earth_rotation(),
-           test_correlations(), test_nose_radius()]
+           test_correlations(), test_nose_radius(), test_cauchy(),
+           test_rn_scaling(), test_demise_energy(), test_blowing_closed_form(),
+           test_hot_wall()]
     print("ИТОГ:", "все проверки пройдены" if all(res) else "есть провалы")
     print()

@@ -57,29 +57,41 @@ def report_budget():
     print("   Разделяем два разных вопроса: ГДЕ происходит вброс и СКОЛЬКО")
     print("   массы вбрасывается. Часть параметров влияет только на одно.\n")
 
-    def run(veh=VEH, entry=ENTRY, atm=ATM, **kw):
+    def run(veh=VEH, entry=ENTRY, atm=ATM, corr="sutton-graves", **kw):
         tr = integrate(veh, entry, atm, **kw)
-        q = tr.heat_flux(veh)
+        q = tr.heat_flux(veh, corr)
         i = int(np.argmax(q))
-        return tr.h[i], q[i], tr.heat_load(veh)
+        # МЕТРИКА МАССЫ — удельная поглощённая энергия, Дж/кг, а не поток
+        # в Вт/м^2: см. heating.absorbed_power, там знак по размеру
+        # переворачивается.
+        return tr.h[i], tr.specific_energy(veh, corr, T_wall=2740.0)
 
-    base_h, base_q, base_Q = run()
+    base_h, base_S = run()
     rows = []
 
     def add(label, kind, variants):
         hs = [v[0] for v in variants]
-        Qs = [v[2] for v in variants]
+        Ss = [v[1] for v in variants]
         rows.append((label, kind, (max(hs) - min(hs)) / 1e3,
-                     100 * (max(Qs) / min(Qs) - 1)))
+                     100 * (max(Ss) / min(Ss) - 1)))
 
-    add("фрагментация (beta 117->17)", "оба",
-        [run(), run(veh=Vehicle(mass=175., area=7., Cd=1.5, nose_radius=0.5))])
+    # Фрагментация теперь ГЕОМЕТРИЧЕСКИ ПОДОБНАЯ: масса, площадь и Rn
+    # меняются согласованно (m~L^3, A~L^2, Rn~L). Свипировать один beta
+    # при фиксированных массе и Rn физически бессмысленно.
+    add("фрагментация (размер L 1.0->0.1)", "оба",
+        [run(veh=Vehicle.geometric_family(L)) for L in (1.0, 0.1)])
     add("Cd 1.0-2.2", "оба",
         [run(veh=Vehicle(mass=175., area=1., Cd=c, nose_radius=0.5))
          for c in (1.0, 2.2)])
-    add("радиус затупления Rn 0.1-2 м", "масса",
+    # Rn как СВОБОДНЫЙ подгоночный параметр при заданных массе и площади:
+    # у нерегулярного кувыркающегося тела эффективный радиус затупления не
+    # определяется массой и миделем. Диапазон 0.2-1.0 м для тела с
+    # характерным размером ~1 м: от почти острой кромки до полного масштаба.
+    add("эффективный Rn 0.2-1.0 м", "масса",
         [run(veh=Vehicle(mass=175., area=1., Cd=1.5, nose_radius=r))
-         for r in (0.1, 2.0)])
+         for r in (0.2, 1.0)])
+    add("форм-фактор 0.25-0.30", "масса",
+        [(base_h, base_S * f / 0.27) for f in (0.25, 0.30)])
     add("наклонение орбиты 0-180°", "оба",
         [run(entry=EntryState(inclination_deg=i)) for i in (0.0, 180.0)])
     add("широта входа -75...0°", "оба",
@@ -90,23 +102,23 @@ def report_budget():
     add("версия MSIS 00 / 2.1", "оба",
         [run(atm=MSISAtmosphere(version=v)) for v in (0, 2.1)])
     add("корреляция С-Г / DKR", "масса",
-        [(base_h, base_q, integrate(VEH, ENTRY, ATM).heat_load(VEH, c))
-         for c in ("sutton-graves", "dkr")])
+        [run(corr=c) for c in ("sutton-graves", "dkr")])
     add("угол входа -1...-3°", "оба",
         [run(entry=EntryState(gamma_deg=g)) for g in (-1.0, -3.0)])
     add("солнечная активность F10.7 70-220", "оба",
         [run(atm=MSISAtmosphere(f107=f, f107a=f)) for f in (70.0, 220.0)])
 
     print(f"   {'фактор':<36}{'влияет на':>11}{'высота, км':>13}"
-          f"{'интеграл потока':>18}")
+          f"{'удельная энергия':>18}")
     for label, kind, dh, dQ in sorted(rows, key=lambda r: -r[2]):
         h_str = f"{dh:.1f}" if kind != "масса" else "—"
         print(f"   {label:<36}{kind:>11}{h_str:>13}{dQ:>17.0f}%")
     print()
-    print("   Читается так: высоту вброса определяет фрагментация, всё")
-    print("   остальное — поправки. А вот МАССУ вброса радиус затупления")
-    print("   двигает вчетверо, не трогая высоту вообще. Это два разных")
-    print("   бюджета, и путать их нельзя.")
+    print("   Метрика массы — УДЕЛЬНАЯ ПОГЛОЩЁННАЯ ЭНЕРГИЯ, Дж/кг, а не поток")
+    print("   в Вт/м^2. По потоку знак зависимости от размера ОБРАТНЫЙ:")
+    print("     q_stag ~ L^-0.5, но A_омыв ~ L^2  ->  P ~ L^+1.5,  P/m ~ L^-1.5")
+    print("   Крупное тело по удельному потоку греется слабее, а по полной")
+    print("   энергии сильнее. Бюджет по q_stag указывал бы не в ту сторону.")
     print("\n   Наклонение и широта — не неопределённости, а ИЗВЕСТНЫЕ входы:")
     print("   для конкретного аппарата они берутся из его орбиты.\n")
     return rows
@@ -167,8 +179,8 @@ def figure_budget(rows, path="step3_budget.png"):
 
     ax = axes[1]
     ax.barh([r[0] for r in rows_q], [r[1] for r in rows_q], color="tab:orange")
-    ax.set_xlabel("размах интегрального теплового потока, %")
-    ax.set_title("бюджет по ТЕПЛУ (прокси массы)")
+    ax.set_xlabel("размах удельной поглощённой энергии, %")
+    ax.set_title("бюджет по МАССЕ (удельная энергия, Дж/кг)")
 
     fig.suptitle("Два разных бюджета: что двигает высоту и что двигает массу",
                  fontsize=11)
