@@ -65,6 +65,50 @@ class Vehicle:
         return 4.0 * self.area if self.wetted_area is None else self.wetted_area
 
     @classmethod
+    def plate(cls, mass: float, thickness: float, Cd: float = 1.5,
+              rho_material: float = 2700.0, nose_floor: float = 5.0e-3, **kw):
+        """Тонкая пластина — панель, кожух, элемент MLI.
+
+        ПОЧЕМУ ОТДЕЛЬНЫЙ КОНСТРУКТОР. Выводить Rn из площади как у сферы
+        (Rn = sqrt(A/pi)) для пластины неверно и даёт абсурд: панель с
+        beta = 4 кг/м^2 получила бы Rn = 96 см. Пластина имеет низкий beta
+        не потому, что она большая, а потому, что она ТОНКАЯ.
+
+        Для кувыркающейся пластины по формуле Коши средняя проекция равна
+        четверти поверхности, а поверхность ~ 2*A_пластины, значит средняя
+        проекция = A/2. Отсюда
+
+            beta = m/(Cd*A_проекц) = rho*A*t/(Cd*A/2) = 2*rho*t/Cd
+
+        то есть beta задаётся ТОЛЩИНОЙ и ничем больше. Для Al при Cd=1.5:
+        t = 1 мм -> beta = 3.6;  t = 2 мм -> beta = 7.2;  t = 5 мм -> 18.
+        Это ровно та полоса 1-10, которую дают панели и MLI в списках
+        фрагментов, — то есть параметризация через толщину воспроизводит
+        известный диапазон, а не подгоняется под него.
+
+        Эффективный радиус затупления — радиус кромки, ~t/2, НО с полом.
+        Пол обязателен: при Rn -> 0 корреляция даёт q -> бесконечность,
+        что нефизично. Реальная абляционная кромка сама себя затупляет до
+        самосогласованного радиуса. Пол 5 мм — оценка снизу этого радиуса,
+        и он входит в свип чувствительности.
+        """
+        area_plate = mass / (rho_material * thickness)
+        area_proj = area_plate / 2.0
+        return cls(mass=mass, area=area_proj, Cd=Cd,
+                   nose_radius=max(thickness / 2.0, nose_floor),
+                   wetted_area=2.0 * area_plate, **kw)
+
+    @classmethod
+    def compact(cls, mass: float, beta: float, Cd: float = 1.5, **kw):
+        """Компактный (не пластинчатый) фрагмент: силовой набор, кронштейны.
+
+        Здесь сфероэквивалент уместен: Rn = sqrt(A_проекц/pi).
+        """
+        area = mass / (Cd * beta)
+        return cls(mass=mass, area=area, Cd=Cd,
+                   nose_radius=float(np.sqrt(area / np.pi)), **kw)
+
+    @classmethod
     def geometric_family(cls, scale: float, mass0: float = 175.0,
                          area0: float = 1.0, nose0: float = 0.5,
                          Cd: float = 1.5, **kw):
