@@ -19,7 +19,7 @@ from .vehicle import EntryState, Vehicle
 I_V, I_GAMMA, I_H, I_S = 0, 1, 2, 3
 
 
-def eom(t, y, vehicle: Vehicle, atmosphere):
+def eom(t, y, vehicle: Vehicle, atmosphere, v_corot: float = 0.0):
     """Правая часть системы.
 
         dV/dt     = -(1/2) rho V^2 Cd A / m  -  (mu/r^2) sin(gamma)
@@ -38,7 +38,13 @@ def eom(t, y, vehicle: Vehicle, atmosphere):
     g = MU_EARTH / (r * r)
     rho = atmosphere.density(h)
 
-    drag_decel = 0.5 * rho * V * V * vehicle.Cd * vehicle.area / vehicle.mass
+    # Сопротивление и нагрев зависят от скорости ОТНОСИТЕЛЬНО АТМОСФЕРЫ,
+    # а она вращается вместе с Землёй. v_corot = omega*R*cos(i), см.
+    # EntryState.corotation_speed. При i=53 это 280 м/с, то есть 3.7% в V
+    # и ~11% в тепловом потоке, потому что q ~ V^3.
+    V_rel = V - v_corot
+
+    drag_decel = 0.5 * rho * V_rel * V_rel * vehicle.Cd * vehicle.area / vehicle.mass
 
     dV = -drag_decel - g * np.sin(gamma)
     dgamma = np.cos(gamma) * (V / r - g / V)
@@ -73,6 +79,7 @@ class TrajectoryResult:
     decel: np.ndarray          # полное аэродинамическое замедление, м/с^2
     stop_reason: str
     raw: object                # объект solve_ivp, если нужен dense_output
+    V_rel: np.ndarray = None   # скорость относительно вращающейся атмосферы
 
     @property
     def gamma_deg(self):
@@ -92,19 +99,36 @@ class TrajectoryResult:
         затупления, ни от размерности. Её можно считать уже на шаге 1;
         абсолютную величину потока — только на шаге 3.
         """
-        return np.sqrt(self.rho) * self.V ** 3
+        V = self.V_rel if self.V_rel is not None else self.V
+        return np.sqrt(self.rho) * V ** 3
+
+    def heat_flux(self, vehicle, correlation="sutton-graves") -> np.ndarray:
+        """Тепловой поток в точке торможения вдоль траектории, Вт/м^2."""
+        from .heating import detra_kemp_riddell_shape, sutton_graves
+        V = self.V_rel if self.V_rel is not None else self.V
+        f = sutton_graves if correlation == "sutton-graves" else detra_kemp_riddell_shape
+        return f(self.rho, V, vehicle.nose_radius)
+
+    def heat_load(self, vehicle, correlation="sutton-graves") -> float:
+        """Интегральный тепловой поток, Дж/м^2. Именно он греет материал."""
+        return float(np.trapezoid(self.heat_flux(vehicle, correlation), self.t))
 
     def peak_heating(self):
         """(h [м], V [м/с], t [с]) в точке максимума sqrt(rho)*V^3."""
         i = int(np.argmax(self.heat_flux_shape))
         return self.h[i], self.V[i], self.t[i]
 
-    def state_at_altitude(self, h_target: float):
-        """EntryState на заданной высоте — точка рестарта после фрагментации."""
+    def state_at_altitude(self, h_target: float, inclination_deg: float = 53.0):
+        """EntryState на заданной высоте — точка рестарта после фрагментации.
+
+        Наклонение надо передавать явно: оно не восстанавливается из
+        состояния [V, gamma, h, s], а от него зависит соатмосферный снос.
+        """
         i = int(np.argmin(np.abs(self.h - h_target)))
         return EntryState(altitude=float(self.h[i]),
                           velocity=float(self.V[i]),
-                          gamma_deg=float(self.gamma_deg[i]))
+                          gamma_deg=float(self.gamma_deg[i]),
+                          inclination_deg=inclination_deg)
 
 
 def integrate(
@@ -113,6 +137,7 @@ def integrate(
     atmosphere,
     h_stop: float = 30.0e3,
     v_stop: float = 300.0,
+    earth_rotation: bool = True,
     t_max: float = 3000.0,
     max_step: float = 2.0,
     rtol: float = 1e-8,
@@ -131,12 +156,13 @@ def integrate(
     """
     y0 = entry.to_vector()
     atol = np.array([1e-3, 1e-9, 1e-3, 1e-3])
+    v_corot = entry.corotation_speed if earth_rotation else 0.0
 
     sol = solve_ivp(
         eom,
         t_span=(0.0, t_max),
         y0=y0,
-        args=(vehicle, atmosphere),
+        args=(vehicle, atmosphere, v_corot),
         method="DOP853",
         events=_make_events(h_stop, v_stop),
         rtol=rtol,
@@ -154,7 +180,8 @@ def integrate(
     V, gamma, h, s = sol.sol(t)
 
     rho = atmosphere.density(h)
-    decel = 0.5 * rho * V * V * vehicle.Cd * vehicle.area / vehicle.mass
+    V_rel = V - v_corot
+    decel = 0.5 * rho * V_rel ** 2 * vehicle.Cd * vehicle.area / vehicle.mass
 
     if sol.t_events[0].size:
         reason = f"достигнута высота {h_stop/1e3:.0f} км"
@@ -163,7 +190,7 @@ def integrate(
     else:
         reason = f"истёк лимит времени {t_max:.0f} с"
 
-    return TrajectoryResult(t, V, gamma, h, s, rho, decel, reason, sol)
+    return TrajectoryResult(t, V, gamma, h, s, rho, decel, reason, sol, V_rel)
 
 
 # ---------------------------------------------------------------------------

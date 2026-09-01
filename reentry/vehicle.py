@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .constants import OMEGA_EARTH, R_EARTH
+
 
 @dataclass
 class Vehicle:
@@ -56,6 +58,29 @@ class EntryState:
     altitude: float = 120.0e3    # м
     velocity: float = 7500.0     # м/с (относительно невращающейся Земли)
     gamma_deg: float = -1.5      # градусы
+    inclination_deg: float = 53.0    # наклонение орбиты, град
+
+    @property
+    def corotation_speed(self) -> float:
+        """Скорость соатмосферного вращения ВДОЛЬ ТРАЕКТОРИИ, м/с.
+
+        Атмосфера вращается вместе с Землёй на восток со скоростью
+        u = omega*R*cos(lat). Вдоль трассы работает её проекция u*sin(A),
+        где A — путевой угол (азимут от севера). Из сферической тригонометрии
+        для орбиты наклонения i:  sin(A) = cos(i)/cos(lat).
+
+        Широта сокращается:
+
+            v_вдоль = omega*R*cos(lat) * cos(i)/cos(lat) = omega*R*cos(i)
+
+        То есть вклад зависит ТОЛЬКО от наклонения, а не от того, где
+        именно объект входит. Проверка предельных случаев:
+          i = 0    экваториальная прямая  -> +465 м/с (атмосфера догоняет)
+          i = 53   типичная НОО           -> +280 м/с
+          i = 90   полярная               -> 0
+          i = 98   ССО, обратная          -> -65 м/с (атмосфера навстречу)
+        """
+        return OMEGA_EARTH * R_EARTH * np.cos(np.deg2rad(self.inclination_deg))
 
     @property
     def gamma_rad(self) -> float:
