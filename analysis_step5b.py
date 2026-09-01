@@ -141,7 +141,7 @@ def part_f_instruments(lam_c):
     lin = true.copy()
     lin[gap] = np.interp(LAM[gap], [LAM[i0], LAM[i1]], [true[i0], true[i1]])
 
-    print("\n   ПРОВАЛ 1.4-2.5 мкм, если мид-ИК измерен и провал интерполирован:")
+    print("\n   ПРОБЕЛ 1.4-2.5 мкм, если мид-ИК измерен и пробел интерполирован:")
     print(f"   {'T, K':>7}{'истинная':>11}{'интерполяция':>15}{'ошибка':>10}")
     for T in (1500., 2000., 2740.):
         a = total_emissivity(LAM, true, T); b = total_emissivity(LAM, lin, T)
