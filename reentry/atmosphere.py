@@ -1,12 +1,19 @@
 """Модели атмосферы.
 
-Шаг 1: экспоненциальная заглушка.
-Шаг 2: сюда придёт NRLMSISE-00 с тем же интерфейсом .density(h).
+Шаг 1: экспоненциальная заглушка (ExponentialAtmosphere).
+Шаг 2: NRLMSISE-00 / NRLMSIS 2.x через pymsis (MSISAtmosphere).
+
+Обе модели дают одинаковый интерфейс: .density(h) и .scale_height(h),
+поэтому траекторный код их не различает.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from datetime import datetime
+
 import numpy as np
+from scipy.interpolate import CubicSpline
 
 from .constants import H_SCALE_FIT, RHO0_SEA_LEVEL
 
@@ -46,3 +53,109 @@ class ExponentialAtmosphere:
     def scale_height(self, h):
         """Локальная шкала высот, м. Для экспоненты — константа по определению."""
         return self.H
+
+
+class MSISAtmosphere:
+    """NRLMSISE-00 / NRLMSIS 2.x через pymsis, затабулированная и сплайненная.
+
+    ПОЧЕМУ НЕ ЗОВЁМ pymsis НАПРЯМУЮ ИЗ ПРАВОЙ ЧАСТИ ОДУ.
+    solve_ivp вызывает density() десятки тысяч раз за прогон. Прямой вызов
+    MSIS на каждом шаге — это секунды на траекторию и часы на свип.
+    Табулируем один раз на сетке по высоте и интерполируем.
+
+    ПОЧЕМУ СПЛАЙН ПО log(rho), А НЕ ПО rho.
+    Плотность меняется на 6 порядков на нашем диапазоне; линейная
+    интерполяция по rho в разреженной части даёт чудовищную ошибку.
+    log(rho) почти линеен по высоте (это и есть смысл шкалы высот),
+    поэтому интерполируется отлично.
+
+    ПОЧЕМУ КУБИЧЕСКИЙ, А НЕ ЛИНЕЙНЫЙ.
+    Линейная интерполяция по log(rho) даёт кусочно-экспоненциальную
+    плотность: непрерывную, но с изломами производной. Адаптивный
+    интегратор на каждом изломе режет шаг. CubicSpline даёт C2 и
+    правая часть ОДУ остаётся гладкой.
+
+    Параметры среды — физические, а не косметические:
+      f107, f107a : поток на 10.7 см, индекс солнечной активности.
+                    ~70 в минимуме цикла, ~140 умеренно, ~220 в максимуме.
+                    Влияет в основном на термосферу (выше 100 км), где
+                    торможение всё равно пренебрежимо. Проверяется свипом.
+      ap          : геомагнитный индекс. 4 — спокойно, 50+ — буря.
+      lat, lon    : контролируемые сходы обычно целят в южную часть Тихого
+                    океана (SPOUA), примерно -40 град широты.
+      version     : 0 = NRLMSISE-00 (как в ТЗ), 2.1 = NRLMSIS 2.1.
+                    2.x переподогнан по мезосфере и нижней термосфере —
+                    то есть ровно по нашему диапазону. Разница 3-14%.
+    """
+
+    def __init__(
+        self,
+        date: "datetime | np.datetime64" = np.datetime64("2026-09-01T12:00"),
+        lat: float = -40.0,
+        lon: float = -140.0,
+        f107: float = 140.0,
+        f107a: float = 140.0,
+        ap: float = 4.0,
+        version: float = 0,
+        h_max: float = 200.0e3,
+        dh: float = 250.0,
+    ):
+        import pymsis  # локальный импорт: шаг 1 работает без pymsis
+
+        self.date = date
+        self.lat, self.lon = lat, lon
+        self.f107, self.f107a, self.ap = f107, f107a, ap
+        self.version = version
+        self.name = f"NRLMSISE-00" if version == 0 else f"NRLMSIS {version}"
+        self.name += (f" (F10.7={f107:.0f}, Ap={ap:.0f}, "
+                      f"lat={lat:+.0f}, {str(date)[:10]})")
+
+        self._h_grid = np.arange(0.0, h_max + dh, dh)
+        out = pymsis.calculate(
+            date, lon, lat, self._h_grid / 1e3,
+            f107s=f107, f107as=f107a, aps=[[ap] * 7],
+            version=version,
+        )
+        rho = out[..., pymsis.Variable.MASS_DENSITY].ravel()
+
+        # MSIS может вернуть NaN у самой земли для некоторых версий —
+        # обрезаем сетку по валидным значениям, а не подставляем заглушку.
+        good = np.isfinite(rho) & (rho > 0)
+        if not good.all():
+            self._h_grid = self._h_grid[good]
+            rho = rho[good]
+
+        self._log_rho = CubicSpline(self._h_grid, np.log(rho))
+        self._h_lo, self._h_hi = self._h_grid[0], self._h_grid[-1]
+
+        # Шкала высот на верхней границе — для экспоненциальной экстраполяции
+        self._H_top = -1.0 / self._log_rho(self._h_hi, 1)
+        self._log_rho_top = float(self._log_rho(self._h_hi))
+
+        # Совместимость с ExponentialAtmosphere: rho у поверхности
+        self.rho0 = float(np.exp(self._log_rho(self._h_lo)))
+
+    def density(self, h):
+        """Плотность, кг/м^3. h — геометрическая высота, м."""
+        h = np.asarray(h, dtype=float)
+        h_clipped = np.clip(h, self._h_lo, self._h_hi)
+        log_rho = self._log_rho(h_clipped)
+        # Выше сетки — экспоненциальная экстраполяция с верхней шкалой высот.
+        above = h > self._h_hi
+        if np.any(above):
+            log_rho = np.where(
+                above,
+                self._log_rho_top - (h - self._h_hi) / self._H_top,
+                log_rho,
+            )
+        return np.exp(log_rho)
+
+    def scale_height(self, h):
+        """ЛОКАЛЬНАЯ шкала высот H = -1/(d ln rho / dh), м.
+
+        В отличие от экспоненциальной модели это не константа. Именно
+        разброс этой величины по высоте и есть мера того, насколько
+        однопараметрическая заглушка была неправа.
+        """
+        h_clipped = np.clip(np.asarray(h, dtype=float), self._h_lo, self._h_hi)
+        return -1.0 / self._log_rho(h_clipped, 1)
