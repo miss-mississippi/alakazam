@@ -76,8 +76,8 @@ def test_allen_eggers():
     gamma_peak_deg = traj.gamma_deg[i]
     a_num, h_num, v_num = traj.peak_decel()
 
-    ae0 = allen_eggers(veh, entry, atm)
-    ae1 = allen_eggers(veh, EntryState(gamma_deg=gamma_peak_deg), atm)
+    ae0 = allen_eggers(veh, entry)
+    ae1 = allen_eggers(veh, EntryState(gamma_deg=gamma_peak_deg))
 
     print(f"   gamma в начале                 {entry.gamma_deg:+7.2f} град")
     print(f"   gamma в точке пика торможения  {gamma_peak_deg:+7.2f} град"

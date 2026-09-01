@@ -161,7 +161,7 @@ def main():
     atmosphere = ExponentialAtmosphere()
 
     traj = integrate(vehicle, entry, atmosphere, h_stop=30e3)
-    ae = allen_eggers(vehicle, entry, atmosphere)
+    ae = allen_eggers(vehicle, entry)
 
     print_report(traj, ae, vehicle, entry, atmosphere)
     figure_main(traj, ae, atmosphere, entry)

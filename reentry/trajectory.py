@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from .constants import MU_EARTH, R_EARTH
+from .constants import H_SCALE_FIT, MU_EARTH, R_EARTH, RHO0_SEA_LEVEL
 from .vehicle import EntryState, Vehicle
 
 # Индексы вектора состояния
@@ -83,6 +83,29 @@ class TrajectoryResult:
         i = int(np.argmax(self.decel))
         return self.decel[i], self.h[i], self.V[i]
 
+    @property
+    def heat_flux_shape(self):
+        """sqrt(rho)*V^3 — ФОРМА теплового потока Саттона-Грейвса без констант.
+
+        q = k*sqrt(rho/Rn)*V^3, и k, Rn — константы вдоль траектории.
+        Значит ВЫСОТА пика нагрева не зависит ни от k, ни от радиуса
+        затупления, ни от размерности. Её можно считать уже на шаге 1;
+        абсолютную величину потока — только на шаге 3.
+        """
+        return np.sqrt(self.rho) * self.V ** 3
+
+    def peak_heating(self):
+        """(h [м], V [м/с], t [с]) в точке максимума sqrt(rho)*V^3."""
+        i = int(np.argmax(self.heat_flux_shape))
+        return self.h[i], self.V[i], self.t[i]
+
+    def state_at_altitude(self, h_target: float):
+        """EntryState на заданной высоте — точка рестарта после фрагментации."""
+        i = int(np.argmin(np.abs(self.h - h_target)))
+        return EntryState(altitude=float(self.h[i]),
+                          velocity=float(self.V[i]),
+                          gamma_deg=float(self.gamma_deg[i]))
+
 
 def integrate(
     vehicle: Vehicle,
@@ -147,11 +170,17 @@ def integrate(
 # Аналитика Аллена-Эггерса — только для сверки, в расчёте не участвует.
 # ---------------------------------------------------------------------------
 
-def allen_eggers(vehicle: Vehicle, entry: EntryState, atmosphere) -> dict:
+def allen_eggers(vehicle: Vehicle, entry: EntryState,
+                 rho0: float = RHO0_SEA_LEVEL, H: float = H_SCALE_FIT) -> dict:
     """Классическое замкнутое решение (Allen & Eggers, NACA TR-1381, 1958).
 
     Допущения: gamma = const, сопротивление >> гравитации, экспоненциальная
     атмосфера, постоянный баллистический коэффициент.
+
+    rho0 и H передаются ЯВНО, а не берутся из объекта атмосферы. Причина:
+    А-Э определён только для экспоненциальной атмосферы, и обёртка над
+    NRLMSISE-00 никакого rho0 иметь не будет. Сверка сознательно привязана
+    к заглушке — на реальной атмосфере формула всё равно неприменима.
 
     У нас нарушены ПЕРВЫЕ ДВА: gamma успевает измениться вдвое, а первые
     100 с полёт вообще бездрагвый. Поэтому ожидание — совпадение в пределах
@@ -164,13 +193,12 @@ def allen_eggers(vehicle: Vehicle, entry: EntryState, atmosphere) -> dict:
     """
     V0 = entry.velocity
     sin_g = abs(np.sin(entry.gamma_rad))
-    H = atmosphere.scale_height(entry.altitude)
     beta = vehicle.ballistic_coefficient
 
     v_at_peak = V0 / np.sqrt(np.e)
     a_max = V0 ** 2 * sin_g / (2 * np.e * H)
     rho_at_peak = beta * sin_g / H
-    h_at_peak = -H * np.log(rho_at_peak / atmosphere.rho0)
+    h_at_peak = -H * np.log(rho_at_peak / rho0)
 
     return {
         "V_at_peak": v_at_peak,
