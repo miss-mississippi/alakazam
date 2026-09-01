@@ -60,6 +60,24 @@ class Aluminium:
     T_initial: float = 300.0      # K
     emissivity: float = 0.3       # ГЛАВНАЯ ОСЬ СВИПА, диапазон 0.05-0.35
 
+    # Рост оксидной плёнки: eps НЕ константа, а траектория.
+    # Тонкая плёнка оптически прозрачна — излучает металл под ней, eps низкое.
+    # По мере утолщения eps растёт к значению объёмного оксида.
+    # None -> eps постоянна. Иначе tau_ox = время, за которое плёнка
+    # набирает оптическую толщину (параболический рост: delta ~ sqrt(t),
+    # значит delta/delta_c = sqrt(t/tau)).
+    tau_oxide: float | None = None   # с
+    eps_metal: float = 0.05          # голый расплав Al
+    eps_oxide: float = 0.35          # сплошная альфа-Al2O3 при 1800 K
+
+    def eps_at(self, t):
+        """Излучательная способность в момент t, с начала полёта фрагмента."""
+        if self.tau_oxide is None:
+            return self.emissivity
+        x = np.sqrt(np.maximum(np.asarray(t, dtype=float), 0.0) / self.tau_oxide)
+        return self.eps_metal + (self.eps_oxide - self.eps_metal) * (
+            1.0 - np.exp(-x))
+
     @property
     def h_melt_complete(self) -> float:
         """Энергия на килограмм до полного расплавления, Дж/кг.
@@ -205,11 +223,50 @@ def thermal_diffusion_depth(t_flight: float, k=K_ALUMINIUM,
                             rho=RHO_ALUMINIUM, c_p=900.0) -> float:
     """Глубина прогрева за время полёта, м: sqrt(alpha*t), alpha = k/(rho*c_p).
 
-    Критерий применимости сосредоточенной модели. Для Al alpha = 6.9e-5 м^2/с,
-    за 300 с это 14 см. Стенка тоньше — прогревается насквозь, модель
-    применима. Толще — участвует только приповерхностный слой.
+    Что этот критерий ГОВОРИТ: температура по толщине успевает выровняться,
+    то есть сосредоточенная по толщине модель законна. Для Al alpha = 6.9e-5,
+    за 300 с это 14 см.
+
+    Что он НЕ говорит: он НЕ разделяет энергетический и радиационный режимы.
+    И 1 мм, и 16 мм много тоньше 14 см, то есть сосредоточенная модель законна
+    для обеих, а ведут они себя противоположно. Разделяет их поверхностная
+    теплоёмкость — см. regime_number().
     """
     return float(np.sqrt(k / (rho * c_p) * t_flight))
+
+
+def areal_heat_capacity(thickness: float, rho=RHO_ALUMINIUM,
+                        c_p=900.0) -> float:
+    """Поверхностная теплоёмкость rho*c_p*delta, Дж/(м^2*К)."""
+    return rho * c_p * thickness
+
+
+def regime_number(traj, vehicle, material: "Aluminium",
+                  wall_thickness: float | None = None) -> dict:
+    """Pi = доступная энергия / энергия, нужная чтобы дойти до кипения.
+
+    ЭТО и есть разделитель режимов, а не глубина прогрева.
+
+        Pi = phi * int(q_stag dt)  /  (rho*c_p*delta * (T_кип - T0))
+
+    Pi >> 1 — тело выходит на радиационное равновесие, дальше всё решает eps.
+    Pi << 1 — энергии не хватает даже на разогрев, задача ЭНЕРГЕТИЧЕСКАЯ,
+              eps почти не влияет, потому что переизлучение мало.
+
+    Численно: стенка 16 мм даёт поверхностную теплоёмкость 39 кДж/(м^2*К),
+    до кипения нужно 96 МДж/м^2, доступно 24 -> Pi = 0.26.
+    Пластина 1 мм: 2.4 кДж/(м^2*К), нужно 5.9 МДж/м^2, доступно 42 -> Pi = 7.1.
+    Разница в 27 раз, и она объясняет всё поведение.
+    """
+    from .heating import SHAPE_FACTOR_TUMBLING
+    if wall_thickness is None:
+        wall_thickness = vehicle.mass / (RHO_ALUMINIUM * vehicle.wetted)
+    C = areal_heat_capacity(wall_thickness)
+    need = C * (material.T_boil - material.T_initial)
+    avail = SHAPE_FACTOR_TUMBLING * traj.heat_load(vehicle)
+    return {"Pi": avail / need, "areal_C": C, "need": need, "available": avail,
+            "thickness": wall_thickness,
+            "regime": "радиационный" if avail > need else "энергетический"}
 
 
 def surface_thermal_model(traj, vehicle, material: Aluminium,
@@ -263,7 +320,7 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
     flux_frac = mu                                      # f(theta) = cos(theta)
     dA = vehicle.wetted / (2.0 * n_bands)               # половина поверхности
 
-    sigma_eps = material.emissivity * SIGMA_SB
+    use_growth = material.tau_oxide is not None
     m_band = RHO_ALUMINIUM * t_eff * dA                 # участвующая масса пояса
     h3 = (material.c_p * (material.T_melt - material.T_initial)
           + material.L_fusion
@@ -273,8 +330,9 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
         h_s = y[:n_bands]
         T = temperature_from_enthalpy(h_s, material)
         q = float(q_spline(t)) * hot_wall_factor(float(V_spline(t)), T)
+        eps_t = material.eps_at(t - traj.t[0]) if use_growth else material.emissivity
         q_in = np.maximum(q, 0.0) * flux_frac
-        rad = sigma_eps * T ** 4
+        rad = eps_t * SIGMA_SB * T ** 4
         net = q_in - rad
         # Переключение "греется / кипит" СГЛАЖЕНО по узкому окну энтальпии.
         # Жёсткий np.where даёт разрыв правой части, на котором LSODA

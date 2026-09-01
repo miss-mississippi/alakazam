@@ -13,8 +13,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from reentry import EntryState, MSISAtmosphere, Vehicle, integrate
-from reentry.ablation import (Aluminium, surface_thermal_model,
-                             thermal_diffusion_depth)
+from reentry.ablation import (Aluminium, regime_number,
+                             surface_thermal_model, thermal_diffusion_depth)
 from reentry.heating import (SHAPE_FACTOR_TUMBLING, SIGMA_SB, hot_wall_factor,
                              vaporizing_area_fraction, vaporization_rate)
 
@@ -235,12 +235,82 @@ def figure_bracket(path="step4_bracket.png"):
     print(f"   сохранено: {path}")
 
 
+MW_AL_IN_OXIDE = 2 * 26.98 / (2 * 26.98 + 3 * 16.00)   # 0.5292
+
+
+def report_ferreira():
+    """Сверка с Ferreira независимым путём."""
+    print("D. СВЕРКА С FERREIRA")
+    print(f"   Ferreira: 250 кг, 30% Al = 75.0 кг Al -> ~30 кг Al2O3")
+    print(f"   Al в них: 30 * {MW_AL_IN_OXIDE:.4f} = {30*MW_AL_IN_OXIDE:.1f} кг"
+          f"  ->  выход {100*30*MW_AL_IN_OXIDE/75:.0f}%")
+    print(f"   в нормировке на массу спутника: {30/250:.3f} кг Al2O3 на кг\n")
+    print(f"   {'eps':>6}{'Al исп., кг':>13}{'выход':>8}{'Al2O3, кг':>12}"
+          f"{'Al2O3/кг спутника':>20}")
+    f_al = INTACT.al_mass_fraction
+    for e in (0.05, 0.10, 0.15, 0.20, 0.30):
+        mat = Aluminium(emissivity=float(e))
+        _, frags = run_fragments(mat)
+        tot = sum(surface_thermal_model(tr, veh, mat, wall_thickness=tw)["m_vap"]
+                  for _, veh, tr, _, _, tw in frags)
+        al = tot * f_al
+        print(f"   {e:>6.2f}{al:>13.1f}{100*al/(M0*f_al):>7.0f}%"
+              f"{al/MW_AL_IN_OXIDE:>12.1f}{al/MW_AL_IN_OXIDE/M0:>20.3f}")
+    print("\n   Диапазон 14-29% НАКРЫВАЕТ значение Ferreira (21%), полученное")
+    print("   совершенно другим путём — молекулярной динамикой окисления.")
+    print("   Оговорка: другая масса, другие условия входа, у него число")
+    print("   обобщённое. Это согласие по порядку величины, не валидация.\n")
+
+
+def report_oxide_growth():
+    print("E. eps КАК ТРАЕКТОРИЯ: РОСТ ОКСИДНОЙ ПЛЁНКИ")
+    print("   Тонкая плёнка оптически прозрачна -> излучает металл под ней.")
+    print("   delta ~ sqrt(t), eps = eps_мет + (eps_окс-eps_мет)(1-exp(-sqrt(t/tau)))\n")
+    print(f"   {'tau, с':>9}{'eps на пике':>14}{'Al исп., кг':>13}{'выход':>8}")
+    f_al = INTACT.al_mass_fraction
+    for tau in (1.0, 30.0, 100.0, 300.0, 1000.0, 10000.0):
+        mat = Aluminium(tau_oxide=tau)
+        _, frags = run_fragments(mat)
+        tot = sum(surface_thermal_model(tr, veh, mat, wall_thickness=tw)["m_vap"]
+                  for _, veh, tr, _, _, tw in frags)
+        al = tot * f_al
+        print(f"   {tau:>9.0f}{float(mat.eps_at(200.0)):>14.3f}{al:>13.1f}"
+              f"{100*al/(M0*f_al):>7.0f}%")
+    print("\n   Гипотеза физически верна, но неопределённость НЕ СУЖАЕТ:")
+    print("   6-27% против 6-29% у постоянной eps. Неизвестное переименовалось")
+    print("   из 'какое eps' в 'как быстро растёт плёнка'.")
+    print("   Лабораторный запрос уточняется: мерить eps КАК ФУНКЦИЮ ТОЛЩИНЫ")
+    print("   оксида — эллипсометр плюс UV-Vis/FTIR на образцах с контролируемой")
+    print("   степенью окисления.\n")
+
+
+def report_regime():
+    print("F. ЧТО РАЗДЕЛЯЕТ РЕЖИМЫ (поправка)")
+    print("   Не глубина прогрева: и 1 мм, и 16 мм много тоньше 14 см, значит")
+    print("   сосредоточенная модель законна для обеих. Разделяет ПОВЕРХНОСТНАЯ")
+    print("   ТЕПЛОЁМКОСТЬ rho*c_p*delta.\n")
+    print(f"   {'объект':<18}{'delta':>9}{'rho cp d':>13}{'нужно':>13}"
+          f"{'доступно':>12}{'Pi':>8}{'режим':>16}")
+    thin = Vehicle.plate(1.0, 1.0e-3, Cd=CD)
+    for label, veh, tw in (("целый объект", INTACT, None),
+                           ("пластина 1 мм", thin, 1.0e-3)):
+        tr = integrate(veh, ENTRY, ATM)
+        r = regime_number(tr, veh, Aluminium(), wall_thickness=tw)
+        print(f"   {label:<18}{r['thickness']*1e3:>7.1f} мм"
+              f"{r['areal_C']/1e3:>11.1f} кДж{r['need']/1e6:>9.0f} МДж"
+              f"{r['available']/1e6:>8.0f} МДж{r['Pi']:>8.2f}{r['regime']:>16}")
+    print()
+
+
 if __name__ == "__main__":
     print()
     mat = Aluminium()
     report_criteria(mat)
     report_epsilon(mat)
     report_fragments(Aluminium(emissivity=0.10))
+    report_ferreira()
+    report_oxide_growth()
+    report_regime()
     figure_epsilon()
     figure_bracket()
     print()
