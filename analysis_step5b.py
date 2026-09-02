@@ -119,6 +119,61 @@ def part_e_kirchhoff():
     return lam_c
 
 
+def part_e2_shape_sweep():
+    """Насколько валидация зависит от РУЧНОГО выбора формы кривой.
+
+    В eps_film четыре параметра. По справочной точке 1800 K подбирается
+    только lam_c; eps_short, eps_long и width выбраны рукой. Значит
+    "предсказание" второй точки может быть следствием удачного выбора
+    остальных трёх, а не физики.
+
+    Свипуем все четыре, каждый раз перефитируя lam_c под ту же точку 1800 K,
+    и смотрим, что происходит с предсказанной eps(300 K) и с рабочей
+    eps(2740 K).
+    """
+    import itertools
+    print("E2. НАСКОЛЬКО ВАЛИДАЦИЯ ЗАВИСИТ ОТ ВЫБОРА ФОРМЫ")
+    print("   Свип по eps_short, eps_long, width; lam_c каждый раз")
+    print("   перефитируется под справочную точку 1800 K.\n")
+    rows = []
+    for es, el, w in itertools.product((0.03, 0.05, 0.07, 0.10),
+                                       (0.85, 0.92, 1.00),
+                                       (1.0, 2.0, 3.0, 4.0)):
+        try:
+            lc = brentq(lambda x: total_emissivity(
+                LAM, eps_film(LAM, es, x, el, w), 1800.) - 0.35, 0.3e-6, 40e-6)
+        except ValueError:
+            continue
+        rows.append((es, el, w,
+                     total_emissivity(LAM, eps_film(LAM, es, lc, el, w), 300.),
+                     total_emissivity(LAM, eps_film(LAM, es, lc, el, w), 2740.)))
+    e300 = np.array([r[3] for r in rows])
+    e2740 = np.array([r[4] for r in rows])
+    ok300 = np.abs(e300 / 0.83 - 1) < 0.10
+
+    print(f"   наборов формы: {len(rows)}")
+    print(f"   ПРЕДСКАЗАННАЯ eps(300 K), справочное 0.83:")
+    print(f"     разброс {e300.min():.3f} - {e300.max():.3f}  "
+          f"({100*(e300.min()/0.83-1):+.0f}% ... {100*(e300.max()/0.83-1):+.0f}%)")
+    print(f"     в пределах ±10% от справочного: {ok300.sum()} из {len(rows)}")
+    print(f"\n   -> Значит корректная формулировка НЕ 'допущение подтверждено',")
+    print("      а 'в разумном семействе кривых СУЩЕСТВУЕТ набор, воспроизводящий")
+    print("      обе справочные точки'. Это ПОДДЕРЖКА гипотезы, не подтверждение.\n")
+
+    print(f"   РАБОЧАЯ eps(2740 K) — число, которое решает исход:")
+    print(f"     разброс {e2740.min():.3f} - {e2740.max():.3f}, "
+          f"фактор {e2740.max()/e2740.min():.2f}")
+    print(f"     только по наборам, воспроизводящим 300 K: "
+          f"{e2740[ok300].min():.3f} - {e2740[ok300].max():.3f}")
+    print("\n   -> Свобода формы почти не проходит в рабочее число. Причина:")
+    print("      при 2740 K пик Планка в прозрачной области, eps определяется")
+    print("      уровнем eps_short и небольшим фононным хвостом, а положение")
+    print("      края уже пришпилено условием при 1800 K.")
+    print(f"      Фактор {e2740.max()/e2740.min():.1f} вместо фактора 5, который")
+    print("      стоял в таблице констант как главная неопределённость.\n")
+    return float(e2740.min()), float(e2740.max())
+
+
 def part_f_instruments(lam_c):
     print("F. ЦЕНА ОБРЕЗАННОЙ ПОЛОСЫ НА РЕАЛЬНЫХ ПРИБОРАХ")
     print("   По каталогу НУ (проверка Бекнура):")
@@ -237,6 +292,7 @@ if __name__ == "__main__":
     print()
     hb, med, off = part_d_transfer()
     lam_c = part_e_kirchhoff()
+    eps_lo, eps_hi = part_e2_shape_sweep()
     part_f_instruments(lam_c)
     figure(hb, med, off, lam_c)
     print()
