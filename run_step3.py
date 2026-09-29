@@ -12,8 +12,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from reentry.ablation import Aluminium
 from reentry import EntryState, MSISAtmosphere, Vehicle, integrate
 from reentry.constants import G0
+from reentry.results import Recorder
 
 plt.rcParams.update({
     "figure.dpi": 130, "font.size": 9, "axes.grid": True, "grid.alpha": 0.25,
@@ -25,6 +27,17 @@ ENTRY = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5,
                    inclination_deg=53.0)
 ATM = MSISAtmosphere()
 OBS_LO, OBS_HI = 70.0, 80.0
+# Горячая стенка при температуре кипения Al на местном давлении (~1 кПа).
+T_WALL = Aluminium().T_boil_nominal
+R = Recorder("step3")
+BUDGET_KEYS = {
+    "фрагментация (размер L 1.0->0.1)": "fragmentation", "Cd 1.0-2.2": "cd",
+    "эффективный Rn 0.2-1.0 м": "rn", "форм-фактор 0.25-0.30": "shape_factor",
+    "наклонение орбиты 0-180°": "inclination", "широта входа -75...0°": "latitude",
+    "сезон март/сентябрь": "season", "версия MSIS 00 / 2.1": "msis_version",
+    "корреляция С-Г / DKR": "correlation", "угол входа -1...-3°": "entry_angle",
+    "солнечная активность F10.7 70-220": "solar",
+}
 
 
 def report_baseline():
@@ -45,6 +58,15 @@ def report_baseline():
     print(f"   пик торможения     {a/G0:8.1f} g          на {h_a/1e3:.1f} км")
     print(f"   интегральный поток {tr.heat_load(VEH)/1e6:8.1f} МДж/м^2")
     print(f"   разнос пиков       {(tr.h[i]-h_a)/1e3:8.1f} км")
+    R["base.q_peak_wcm2"] = q[i] / 1e4
+    R["base.h_heat_km"] = tr.h[i] / 1e3
+    R["base.t_heat"] = tr.t[i]
+    R["base.V_rel_heat"] = tr.V_rel[i]
+    R["base.amax_g"] = a / G0
+    R["base.h_decel_km"] = h_a / 1e3
+    R["base.Q_MJ"] = tr.heat_load(VEH) / 1e6
+    R["base.separation_km"] = (tr.h[i] - h_a) / 1e3
+    R["base.corotation"] = ENTRY.corotation_speed
     print(f"\n   Наблюдаемое разрушение {OBS_LO:.0f}-{OBS_HI:.0f} км всё ещё на "
           f"{OBS_LO - tr.h[i]/1e3:.0f}-{OBS_HI - tr.h[i]/1e3:.0f} км выше пика.")
     print("   Разрыв никуда не делся — его закрывает фрагментация, шаг 4.\n")
@@ -64,7 +86,7 @@ def report_budget():
         # МЕТРИКА МАССЫ — удельная поглощённая энергия, Дж/кг, а не поток
         # в Вт/м^2: см. heating.absorbed_power, там знак по размеру
         # переворачивается.
-        return tr.h[i], tr.specific_energy(veh, corr, T_wall=2740.0)
+        return tr.h[i], tr.specific_energy(veh, corr, T_wall=T_WALL)
 
     base_h, base_S = run()
     rows = []
@@ -75,7 +97,7 @@ def report_budget():
         rows.append((label, kind, (max(hs) - min(hs)) / 1e3,
                      100 * (max(Ss) / min(Ss) - 1)))
 
-    # Фрагментация теперь ГЕОМЕТРИЧЕСКИ ПОДОБНАЯ: масса, площадь и Rn
+    # Фрагментация ГЕОМЕТРИЧЕСКИ ПОДОБНАЯ: масса, площадь и Rn
     # меняются согласованно (m~L^3, A~L^2, Rn~L). Свипировать один beta
     # при фиксированных массе и Rn физически бессмысленно.
     add("фрагментация (размер L 1.0->0.1)", "оба",
@@ -111,6 +133,8 @@ def report_budget():
     print(f"   {'фактор':<36}{'влияет на':>11}{'высота, км':>13}"
           f"{'удельная энергия':>18}")
     for label, kind, dh, dQ in sorted(rows, key=lambda r: -r[2]):
+        R[f"budget.{BUDGET_KEYS[label]}.h_km"] = dh
+        R[f"budget.{BUDGET_KEYS[label]}.energy_pct"] = dQ
         h_str = f"{dh:.1f}" if kind != "масса" else "—"
         print(f"   {label:<36}{kind:>11}{h_str:>13}{dQ:>17.0f}%")
     print()
@@ -195,3 +219,4 @@ if __name__ == "__main__":
     figure_heating(tr)
     figure_budget(rows)
     print()
+    R.save(__file__)

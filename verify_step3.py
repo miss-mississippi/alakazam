@@ -1,16 +1,24 @@
-"""Проверки шага 3. Запуск: python verify_step3.py
+"""Проверки шага 3. Запуск: python verify_step3.py  (или pytest)
 
-1. Размерность константы Саттона-Грейвса — по измеренному пику Stardust.
+1. Размерность константы Саттона-Грейвса — по расчётному пику Stardust.
 2. Энергетическая вменяемость интегрального потока.
 3. Вращение Земли: предельные случаи по наклонению и цена в тепловом потоке.
 4. Саттон-Грейвс против Detra-Kemp-Riddell: цена показателя степени.
+5. Радиус затупления не двигает высоту пика.
+6. Формула Коши: омываемая площадь = 4 * средняя проекция.
+7. Показатели по размеру: знак по полной энергии противоположен знаку по q_stag.
+8. Энергия на расплав и на испарение против доступной.
+9. Вдув: замкнутая форма против итераций.
+10. Горячая стенка.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
+from reentry.ablation import Aluminium
 from reentry import EntryState, MSISAtmosphere, Vehicle, integrate
+from reentry.results import Recorder
 from reentry.heating import (EXP_DKR, K_SUTTON_GRAVES, SHAPE_FACTOR_TUMBLING,
                              blowing_factor, detra_kemp_riddell_shape,
                              hot_wall_factor, sutton_graves)
@@ -19,23 +27,23 @@ ATM = MSISAtmosphere()
 VEH = Vehicle(mass=175.0, area=1.0, Cd=1.5, nose_radius=0.5)
 ENTRY = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5,
                    inclination_deg=53.0)
+R = Recorder("verify_step3")
 
 
 def test_sutton_graves_units():
     print("1. РАЗМЕРНОСТЬ КОНСТАНТЫ САТТОНА-ГРЕЙВСА")
     print("   Бенчмарк: Stardust, Rn = 0.23 м, V = 12.6 км/с, rho ~ 3e-4 кг/м^3.")
-    print("   Измеренный пик конвективного нагрева ~1200 Вт/см^2.\n")
+    print("   Расчётный пик нагрева ~1200 Вт/см^2.\n")
     q = float(sutton_graves(3.0e-4, 12600.0, 0.23))
     print(f"   формула со входами в СИ даёт   {q:.3e}")
     print(f"   если это Вт/м^2               -> {q/1e4:8.0f} Вт/см^2   <- сходится")
     print(f"   если это Вт/см^2              -> {q:8.3e} Вт/см^2   "
           f"мимо на {q/1200:.0e} раз")
-    ok = 0.5 < (q / 1e4) / 1200.0 < 2.0
-    print(f"\n   -> {'ПОДТВЕРЖДЕНО' if ok else 'ПРОВАЛ'}: k={K_SUTTON_GRAVES:.4e} "
-          f"при входах в СИ даёт Вт/м^2.")
-    print("      NASA TFAWS подписывает Вт/см^2 — это опечатка либо другая")
-    print("      нормировка. Цена ошибки была бы четыре порядка.\n")
-    return ok
+    print(f"\n   k={K_SUTTON_GRAVES:.4e} при входах в СИ даёт Вт/м^2.")
+    print("   NASA TFAWS подписывает Вт/см^2 — это опечатка либо другая")
+    print("   нормировка. Цена ошибки была бы четыре порядка.\n")
+    R["stardust_wcm2"] = q / 1e4
+    assert 0.5 < (q / 1e4) / 1200.0 < 2.0, f"{q/1e4:.0f} Вт/см^2 против ~1200"
 
 
 def test_energy_sanity():
@@ -53,11 +61,10 @@ def test_energy_sanity():
     print(f"   интегральный поток в точке торм.    {Q:.3e} Дж/м^2")
     print(f"   оценка сверху (поток x вся площадь) {E_heat_upper:.3e} Дж")
     print(f"   доля от кинетической энергии        {100*frac:.1f}%")
-    ok = 0.001 < frac < 0.5
-    print(f"\n   -> {'OK' if ok else 'ПРОВАЛ'}: доля в разумном диапазоне.")
-    print("      Заметь, это ОЦЕНКА СВЕРХУ: корреляция для точки торможения")
-    print("      применена ко всей площади. Реальная доля в разы меньше.\n")
-    return ok
+    print("\n   Это ОЦЕНКА СВЕРХУ: корреляция для точки торможения применена")
+    print("   ко всей площади. Реальная доля в разы меньше.\n")
+    R["heat_fraction_pct"] = 100 * frac
+    assert 0.001 < frac < 0.5, f"доля {frac:.3f}"
 
 
 def test_earth_rotation():
@@ -74,6 +81,11 @@ def test_earth_rotation():
         k = int(np.argmax(q))
         if i == 90.0:
             ref = q[k]
+        key = f"rotation.i{int(i)}"
+        R[f"{key}.v_corot"] = e.corotation_speed
+        R[f"{key}.q_peak_wcm2"] = q[k] / 1e4
+        R[f"{key}.h_km"] = tr.h[k] / 1e3
+        R[f"{key}.Q_MJ"] = tr.heat_load(VEH) / 1e6
         print(f"   {i:>9.0f}{e.corotation_speed:>14.1f}{q[k]/1e4:>17.1f}"
               f"{tr.h[k]/1e3:>13.1f}{tr.heat_load(VEH)/1e6:>13.1f}")
 
@@ -87,10 +99,12 @@ def test_earth_rotation():
     print(f"   предсказание было ~-11% (3.7% в V, q ~ V^3)")
     # i=90 должно совпадать с выключенным вращением
     p90 = integrate(VEH, EntryState(inclination_deg=90.0), ATM)
-    ok = abs(p90.heat_flux(VEH).max() / q_off - 1.0) < 1e-6
-    print(f"\n   -> {'OK' if ok else 'ПРОВАЛ'}: полярная орбита (i=90) в точности")
-    print("      совпадает с выключенным вращением — это тест самосогласованности.\n")
-    return ok
+    d = abs(p90.heat_flux(VEH).max() / q_off - 1.0)
+    print("\n   Полярная орбита (i=90) должна в точности совпасть с выключенным")
+    print("   вращением — тест самосогласованности.\n")
+    R["rotation.q_change_pct"] = 100 * (q_on / q_off - 1)
+    R["rotation.Q_change_pct"] = 100 * (on.heat_load(VEH) / off.heat_load(VEH) - 1)
+    assert d < 1e-6, f"i=90 отличается от выключенного вращения на {d:.1e}"
 
 
 def test_correlations():
@@ -110,10 +124,21 @@ def test_correlations():
           f"{q_dkr[i_dkr]/1e4:>12.1f}{100*(q_dkr[i_dkr]/q_sg[i_sg]-1):>+10.1f}%")
     print(f"   {'интеграл, МДж/м^2':<22}{Q_sg/1e6:>16.1f}"
           f"{Q_dkr/1e6:>12.1f}{100*(Q_dkr/Q_sg-1):>+10.1f}%")
-    print("\n   -> Показатель степени двигает высоту пика на доли километра.")
-    print("      Для высотного распределения массы выбор корреляции —")
-    print("      эффект четвёртого порядка, слабее даже версии MSIS.\n")
-    return True
+    print("\n   Показатель степени двигает высоту пика на доли километра:")
+    print("   для высотного распределения выбор корреляции — эффект")
+    print("   четвёртого порядка, слабее даже версии MSIS.\n")
+    dh = (tr.h[i_dkr] - tr.h[i_sg]) / 1e3
+    dQ = 100 * (Q_dkr / Q_sg - 1)
+    R["dkr.h_sg_km"] = tr.h[i_sg] / 1e3
+    R["dkr.h_dkr_km"] = tr.h[i_dkr] / 1e3
+    R["dkr.dh_km"] = dh
+    R["dkr.q_sg_wcm2"] = q_sg[i_sg] / 1e4
+    R["dkr.q_dkr_wcm2"] = q_dkr[i_dkr] / 1e4
+    R["dkr.dq_pct"] = 100 * (q_dkr[i_dkr] / q_sg[i_sg] - 1)
+    R["dkr.Q_sg_MJ"] = Q_sg / 1e6
+    R["dkr.Q_dkr_MJ"] = Q_dkr / 1e6
+    R["dkr.dQ_pct"] = dQ
+    assert abs(dh) < 1.0 and abs(dQ) < 10.0, f"dh={dh:.2f} км, dQ={dQ:.1f}%"
 
 
 def test_nose_radius():
@@ -128,14 +153,15 @@ def test_nose_radius():
         q = tr.heat_flux(v)
         k = int(np.argmax(q))
         heights.append(tr.h[k])
+        R[f"nose.rn{rn*100:.0f}cm.q_peak_wcm2"] = q[k] / 1e4
         print(f"   {rn:>8.2f}{q[k]/1e4:>17.1f}{tr.h[k]/1e3:>13.2f}")
-    ok = (max(heights) - min(heights)) < 1.0
-    print(f"\n   -> {'OK' if ok else 'ПРОВАЛ'}: высота пика идентична "
-          f"(разброс {max(heights)-min(heights):.2e} м).")
-    print("      Rn меняет АБСОЛЮТНЫЙ поток вчетверо на нашем диапазоне,")
-    print("      а значит и абляцию, но не высоту вброса. Это разделение")
-    print("      важно: Rn попадает в бюджет по МАССЕ, а не по ВЫСОТЕ.\n")
-    return ok
+    spread = max(heights) - min(heights)
+    print(f"\n   Высота пика идентична (разброс {spread:.2e} м). Rn меняет")
+    print("   АБСОЛЮТНЫЙ поток вчетверо на нашем диапазоне, а значит и абляцию,")
+    print("   но не высоту вброса: Rn попадает в бюджет по МАССЕ, а не по ВЫСОТЕ.\n")
+    R["nose.h_km"] = heights[0] / 1e3
+    R["nose.h_spread_m"] = spread
+    assert spread < 1.0, f"высота пика гуляет на {spread:.2f} м"
 
 
 def test_cauchy():
@@ -152,9 +178,8 @@ def test_cauchy():
     R = 0.65
     print(f"\n   сверка на сфере R={R} м: проекция {np.pi*R**2:.4f}, "
           f"поверхность {4*np.pi*R**2:.4f}, отношение {4.0:.1f}")
-    ok = abs(Vehicle(area=1.0).wetted - 4.0) < 1e-12
-    print(f"   -> {'OK' if ok else 'ПРОВАЛ'}\n")
-    return ok
+    print()
+    assert abs(Vehicle(area=1.0).wetted - 4.0) < 1e-12
 
 
 def test_rn_scaling():
@@ -185,6 +210,8 @@ def test_rn_scaling():
           f"(ожидалось +1.500)")
     print(f"       показатель удельной энергии  {slope(S_frozen):+.3f}  "
           f"(ожидалось -1.500)")
+    R["scaling.frozen_E"] = slope(E_frozen)
+    R["scaling.frozen_S"] = slope(S_frozen)
     ok = abs(slope(E_frozen) - 1.5) < 1e-6 and abs(slope(S_frozen) + 1.5) < 1e-6
 
     # (б) САМОСОГЛАСОВАННО: у мелкого тела beta меньше, оно тормозится выше
@@ -198,6 +225,10 @@ def test_rn_scaling():
         t2 = integrate(v, ENTRY, ATM)
         E = t2.absorbed_energy(v); S = t2.specific_energy(v)
         E_sc.append(E); S_sc.append(S)
+        R[f"scaling.L{L*10:.0f}.beta"] = v.ballistic_coefficient
+        R[f"scaling.L{L*10:.0f}.h_km"] = t2.peak_heating()[0] / 1e3
+        R[f"scaling.L{L*10:.0f}.E_MJ"] = E / 1e6
+        R[f"scaling.L{L*10:.0f}.Em_MJkg"] = S / 1e6
         print(f"   {L:>6.1f}{v.ballistic_coefficient:>9.1f}"
               f"{t2.peak_heating()[0]/1e3:>13.1f}{E/1e6:>15.1f}{S/1e6:>14.2f}")
     print(f"\n       показатель полной энергии    {slope(E_sc):+.3f}")
@@ -206,34 +237,63 @@ def test_rn_scaling():
     print("      Мелкие осколки получают радикально больше тепла на килограмм —")
     print("      это ВТОРОЙ механизм, которым фрагментация решает исход,")
     print("      независимый от подъёма высоты через beta.\n")
-    return ok
+    R["scaling.sc_E"] = slope(E_sc)
+    R["scaling.sc_S"] = slope(S_sc)
+    assert ok, f"показатели {slope(E_frozen):+.4f}, {slope(S_frozen):+.4f}"
+    assert slope(E_sc) > 0 > slope(S_sc), "знак по размеру должен сохраниться"
 
 
 def test_demise_energy():
-    print("8. ХВАТАЕТ ЛИ ЭНЕРГИИ НА ИСПАРЕНИЕ")
-    print("   Нужно на полное испарение алюминия (оценка, шаг 4 уточнит):")
-    c_p, T0, T_melt, T_boil = 900.0, 300.0, 933.0, 2740.0
-    L_fus, L_vap = 0.397e6, 10.5e6
-    H_total = c_p*(T_melt-T0) + L_fus + c_p*(T_boil-T_melt) + L_vap
-    print(f"     нагрев до плавления  {c_p*(T_melt-T0)/1e6:5.2f} МДж/кг")
-    print(f"     теплота плавления    {L_fus/1e6:5.2f}")
-    print(f"     нагрев до кипения    {c_p*(T_boil-T_melt)/1e6:5.2f}")
+    print("8. ХВАТАЕТ ЛИ ЭНЕРГИИ НА РАСПЛАВ И НА ИСПАРЕНИЕ")
+    mat = Aluminium()
+    Tb = mat.T_boil_nominal
+    print(f"   Свойства Al 6061 из ablation.Aluminium; кипение при местном")
+    print(f"   давлении ~1 кПа: T_кип = {Tb:.0f} K (при 1 атм было бы "
+          f"{mat.T_boil_1atm:.0f} K).")
+    h_heat = mat.h1
+    h_liq = float(mat.h3(Tb)) - mat.h2
+    L_vap = float(mat.L_vapour_at(Tb))
+    H_total = mat.h_vapour_complete
+    print(f"     нагрев до плавления  {h_heat/1e6:5.2f} МДж/кг  (c_p тв. {mat.c_p:.0f})")
+    print(f"     теплота плавления    {mat.L_fusion/1e6:5.2f}")
+    print(f"     нагрев до кипения    {h_liq/1e6:5.2f}         (c_p ж. {mat.c_p_liquid:.0f})")
     print(f"     теплота испарения    {L_vap/1e6:5.2f}")
-    print(f"     ИТОГО                {H_total/1e6:5.2f} МДж/кг\n")
-    print("   Отношение E/m к этой величине = ДОЛЯ МАССЫ, которую в принципе")
-    print("   можно испарить, если бы вся поглощённая энергия шла на испарение.\n")
+    print(f"     ИТОГО                {H_total/1e6:5.2f} МДж/кг"
+          f"   (до полного расплава {mat.h_melt_complete/1e6:.2f})\n")
+    print("   Отношение E/m к этим величинам = доля массы, которую в принципе")
+    print("   можно расплавить / испарить, если бы вся поглощённая энергия шла")
+    print("   на это (без переизлучения — оценка СВЕРХУ).\n")
+    R["energy.T_boil"] = Tb
+    R["energy.heat_to_melt"] = h_heat / 1e6
+    R["energy.fusion"] = mat.L_fusion / 1e6
+    R["energy.heat_to_boil"] = h_liq / 1e6
+    R["energy.vaporization"] = L_vap / 1e6
+    R["energy.total"] = H_total / 1e6
+    R["energy.melt_complete"] = mat.h_melt_complete / 1e6
     print(f"   {'L':>6}{'масса, кг':>12}{'E/m, МДж/кг':>14}"
-          f"{'испаримая доля':>17}")
+          f"{'расплавимая':>14}{'испаримая':>12}")
+    Ss = []
     for L in (1.0, 0.5, 0.2, 0.1):
         v = Vehicle.geometric_family(L)
         t2 = integrate(v, ENTRY, ATM)
-        S = t2.specific_energy(v, T_wall=T_boil)
-        print(f"   {L:>6.1f}{v.mass:>12.2f}{S/1e6:>14.2f}{100*S/H_total:>16.0f}%")
-    print("\n   -> Целый объект: 3%. Наблюдаемая демизабельность конструкции")
-    print("      типа OneWeb/SpaceX — 95% (Ferreira, UNOOSA 2024).")
-    print("      Разрыв по МАССЕ в тридцать раз, поверх разрыва по ВЫСОТЕ в 20 км.")
-    print("      Оба закрываются одним и тем же — фрагментацией.\n")
-    return True
+        S = t2.specific_energy(v, T_wall=Tb)
+        Ss.append(S)
+        R[f"energy.L{L*10:.0f}.mass"] = v.mass
+        R[f"energy.L{L*10:.0f}.Em"] = S / 1e6
+        R[f"energy.L{L*10:.0f}.meltable_pct"] = 100 * min(S / mat.h_melt_complete, 1)
+        R[f"energy.L{L*10:.0f}.vaporizable_pct"] = 100 * S / H_total
+        print(f"   {L:>6.1f}{v.mass:>12.2f}{S/1e6:>14.2f}"
+              f"{100*min(S/mat.h_melt_complete, 1):>13.0f}%{100*S/H_total:>11.0f}%")
+    print("\n   E/m здесь с поправкой на горячую стенку при T_кип, поэтому она")
+    print("   ниже, чем в проверке 7 (там холодная стенка).")
+    print("   -> Целый объект: расплавить можно ~половину, испарить — единицы")
+    print("      процентов. Демизабельность 95% у OneWeb/SpaceX (Ferreira 2024) —")
+    print("      это критерий РАСПЛАВА, сравнивать её надо с первой колонкой.")
+    print("      Разрыв по массе ~2x для расплава, и его закрывает фрагментация:")
+    print("      осколок L = 0.2 плавится целиком.\n")
+    parts = h_heat + mat.L_fusion + h_liq + L_vap
+    assert abs(parts / H_total - 1) < 1e-12, "этапы не складываются в итог"
+    assert all(a < b for a, b in zip(Ss, Ss[1:])), "E/m должна расти с дроблением"
 
 
 def test_blowing_closed_form():
@@ -248,28 +308,31 @@ def test_blowing_closed_form():
     print(f"   итерации (200)   {q:.6e} Вт/м^2")
     print(f"   множитель        {blowing_factor(h_0, H_eff, eta):.4f} "
           f"-> вдув срезает поток на {100*(1-blowing_factor(h_0,H_eff,eta)):.0f}%")
-    ok = abs(closed / q - 1.0) < 1e-9
-    print(f"\n   -> {'OK' if ok else 'ПРОВАЛ'}: нелинейность замыкается аналитически,")
-    print("      неявный решатель на шаге 4 не нужен.\n")
-    return ok
+    print("\n   Нелинейность замыкается аналитически, неявный решатель не нужен.\n")
+    R["blowing.factor"] = float(blowing_factor(h_0, H_eff, eta))
+    assert abs(closed / q - 1.0) < 1e-9, f"замкнутая форма расходится на {closed/q-1:.1e}"
 
 
 def test_hot_wall():
     print("10. ГОРЯЧАЯ СТЕНКА")
+    Tb = Aluminium().T_boil_nominal
+    fs = []
     for V in (7500.0, 6100.0, 4000.0):
-        f = float(hot_wall_factor(V, 2740.0))
-        print(f"   V={V:6.0f} м/с, T=2740 K -> множитель {f:.3f} "
-              f"({100*(f-1):+.0f}%)")
-    print("   -> Поправка растёт по мере торможения: у холодного конца")
-    print("      траектории она уже не мала.\n")
-    return True
+        f = float(hot_wall_factor(V, Tb))
+        f1 = float(hot_wall_factor(V, 2740.0))
+        fs.append(f)
+        R[f"hot_wall.V{V:.0f}.Tb"] = f
+        R[f"hot_wall.V{V:.0f}.T2740"] = f1
+        print(f"   V={V:6.0f} м/с: T={Tb:.0f} K -> {f:.3f} ({100*(f-1):+.0f}%),"
+              f"  T=2740 K -> {f1:.3f} ({100*(f1-1):+.0f}%)")
+        exact = 1.0 - 1300.0 * Tb / (0.5 * V ** 2)
+        assert abs(f - exact) < 1e-12, "множитель не совпадает с 1 - h_w/h_0"
+        assert f > f1, "горячее стенка — меньше поток"
+    print("   Поправка растёт по мере торможения: у холодного конца")
+    print("   траектории она уже не мала.\n")
+    assert fs[0] > fs[1] > fs[2], "поправка должна расти с торможением"
 
 
 if __name__ == "__main__":
-    print()
-    res = [test_sutton_graves_units(), test_energy_sanity(), test_earth_rotation(),
-           test_correlations(), test_nose_radius(), test_cauchy(),
-           test_rn_scaling(), test_demise_energy(), test_blowing_closed_form(),
-           test_hot_wall()]
-    print("ИТОГ:", "все проверки пройдены" if all(res) else "есть провалы")
-    print()
+    from reentry.checks import run_checks
+    raise SystemExit(run_checks(globals(), R, __file__))
