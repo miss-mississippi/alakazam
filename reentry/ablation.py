@@ -3,14 +3,15 @@
 ГЛАВНОЕ АРХИТЕКТУРНОЕ РЕШЕНИЕ. Модель НЕ выдаёт одно число испарённой массы.
 Она выдаёт вилку:
 
-  ВЕРХНЯЯ ГРАНИЦА — расплавленная масса. Критерий ORSAT/DRAMA: поглощённая
-  энергия против теплоты плавления (у ORSAT для generic aluminum
-  heat of ablation = 934.5 кДж/кг, что и есть нагрев до плавления плюс
-  плавление). Это ВСЁ, что в принципе может стать оксидом.
+  ВЕРХНЯЯ ГРАНИЦА — расплавленная масса (по максимуму энтальпии за полёт).
+  Критерий ORSAT/DRAMA: поглощённая энергия против нагрева до плавления плюс
+  теплоты плавления (у ORSAT для generic aluminum heat of ablation =
+  934.5 кДж/кг). Это всё, что в принципе может стать оксидом.
 
-  НИЖНЯЯ ГРАНИЦА — испарённая НА МЕСТЕ масса. Локальный температурный
-  критерий: испаряется та часть поверхности, где местный поток превышает
-  то, что излучение способно отвести при температуре кипения.
+  ИСПАРЕНИЕ НА МЕСТЕ — масса, испарённая при допущении, что расплав
+  УДЕРЖИВАЕТСЯ на фрагменте, пока не закипит (оксидная корка это допускает).
+  Это не строгая нижняя граница: если расплав срывает потоком, на месте
+  испарится меньше, а судьба капель не моделируется.
 
 Между ними — судьба расплава, сорванного сдвигом в поток. Капля может
 испариться дальше по траектории, может окислиться только по поверхности и
@@ -18,7 +19,11 @@
 в глубоководных осадках), может застыть целиком. Ни одна текущая модель
 этого не разрешает, и именно поэтому вилка — результат, а не компромисс.
 
-Отношение границ — 14x по энергии (0.97 против 13.6 МДж/кг).
+ТЕМПЕРАТУРА КИПЕНИЯ ЗАВИСИТ ОТ ДАВЛЕНИЯ. 2792 K — это кипение Al при 1 атм.
+На поверхности фрагмента давление — это давление торможения,
+~0.4-1 кПа на 70-80 км, и Al там кипит при ~1900-2050 K
+(Клапейрон-Клаузиус). Кипение при 1 атм завышало бы порог испарения
+eps*sigma*T^4 примерно втрое.
 """
 
 from __future__ import annotations
@@ -27,197 +32,193 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .heating import (SIGMA_SB, hot_wall_factor, local_flux_fraction,
-                      vaporizing_area_fraction, vaporization_rate)
+from .heating import CP_AIR_HOT, SIGMA_SB, hot_wall_factor, stagnation_pressure
+
+R_GAS = 8.314462618      # Дж/(моль*К)
+M_AL = 0.026982          # кг/моль
+P_ATM = 101325.0         # Па
+
+# Kirchhoff: dL/dT = c_p(пар) - c_p(жидкость) = 20.79 - 31.75 Дж/(моль*К)
+# (одноатомный газ 5/2 R; жидкость — NIST Shomate). На кг: -406 Дж/(кг*К).
+DCP_VAPOUR = (2.5 * R_GAS - 31.751) / M_AL
+
+K_ALUMINIUM = 167.0      # Вт/(м*К), теплопроводность Al 6061 (~10%)
+RHO_ALUMINIUM = 2700.0   # кг/м^3
+
+# Релаксация перегретого расплава. Когда давление падает, падает и T_кип,
+# и пояс оказывается выше новой полки кипения. Избыток энтальпии уходит в
+# испарение (вскипание) с этой постоянной времени. Физически это мгновенно;
+# 0.2 с — численная регуляризация, на результат не влияет (verify_step4).
+TAU_FLASH = 0.2          # с
 
 
 @dataclass
 class Aluminium:
     """Свойства Al 6061. Каждое — с источником и неопределённостью.
 
-    ЭМИССИВНОСТЬ — самая слабая константа модели, и она же решает исход.
-    Тонкость: при 1900 K излучает НЕ окисленный твёрдый алюминий, а расплав
-    с оксидной плёнкой. Это другой материал, и тренд у него другой.
+    ТЕПЛОФИЗИКА
+      c_p            эффективная теплоёмкость твёрдой фазы 300 K -> T_melt:
+                     среднее по NIST Shomate для Al(s) (c_p растёт от 899
+                     при 300 K до 1190 при 890 K), сохраняет энтальпию точно.
+      c_p_liquid     31.75 Дж/(моль*К) = 1177 Дж/(кг*К), NIST Shomate для
+                     Al(l).
+      T_melt         6061: солидус 855 K, ликвидус 925 K (ASM); одна полка
+                     посередине интервала. 933 K — это чистый Al.
+      L_fusion       397 кДж/кг (чистый Al), ~5%.
 
-      полированный Al       0.04-0.07  (300-900 K)
-      окисленный Al         0.07-0.09  (450-900 K)
-      слабо окисленный Al   0.11-0.19  (473-873 K)
-      альфа-Al2O3           0.83 -> 0.35  (300 -> 1800 K)   ПАДАЕТ с ростом T
+    ИСПАРЕНИЕ
+      T_boil_1atm    2792 K (CRC Handbook; в части справочников 2740-2743 K).
+      L_vapour       294 кДж/моль = 10.90 МДж/кг при T_boil_1atm (CRC).
+      T_boil_at(p)   Клапейрон-Клаузиус с опорой на (2792 K, 1 атм).
+                     Против таблицы давления паров CRC: 100 Па -> 1817 K,
+                     1 кПа -> 2054 K, 10 кПа -> 2364 K, расхождение < 2%
+                     (verify_step4).
+      L_vapour_at(T) поправка Кирхгофа, +0.3 МДж/кг при 2000 K.
 
-    То есть у оксида эмиссивность с температурой ПАДАЕТ, а не растёт, и при
-    1900 K оксидная плёнка даёт около 0.3-0.35. Голый жидкий алюминий под ней —
-    блестящий жидкий металл, ~0.05. Физическая вилка: 0.05...0.35, фактор 7.
-
-    Порог кипения прямо пропорционален eps, поэтому eps — ГЛАВНАЯ ОСЬ СВИПА,
-    а не константа с оговоркой. Результат подаётся как функция eps.
+    ИЗЛУЧЕНИЕ — главная ось для тонкостенных фрагментов.
+      surface = "constant"  eps = emissivity при любой T (свипы).
+      surface = "oxide"     плёнка оптически активна: eps(T) одной
+                            спектральной кривой, пришпиленной к alpha-Al2O3
+                            (~0.32 при 2000 K).
+      surface = "bare"      плёнки нет: eps(T) голого металла по
+                            сопротивлению (~0.18 при 2000 K).
+      tau_oxide             рост плёнки: eps(t, T) переходит от "bare" к
+                            "oxide" как 1 - exp(-sqrt(t/tau)), t — время
+                            с момента образования поверхности (разрушения).
     """
 
-    c_p: float = 900.0            # Дж/(кг*К), ~10%
-    T_melt: float = 933.0         # K
-    T_boil: float = 2740.0        # K
-    L_fusion: float = 0.397e6     # Дж/кг, ~5%
-    L_vapour: float = 10.5e6      # Дж/кг, ~5%
-    T_initial: float = 300.0      # K
-    emissivity: float = 0.3       # ГЛАВНАЯ ОСЬ СВИПА, диапазон 0.05-0.35
+    c_p: float = 1038.0
+    c_p_liquid: float = 1177.0
+    T_melt: float = 890.0
+    L_fusion: float = 0.397e6
+    T_initial: float = 300.0
 
-    # Рост оксидной плёнки: eps НЕ константа, а траектория.
-    # Тонкая плёнка оптически прозрачна — излучает металл под ней, eps низкое.
-    # По мере утолщения eps растёт к значению объёмного оксида.
-    # None -> eps постоянна. Иначе tau_ox = время, за которое плёнка
-    # набирает оптическую толщину (параболический рост: delta ~ sqrt(t),
-    # значит delta/delta_c = sqrt(t/tau)).
-    tau_oxide: float | None = None   # с
-    eps_metal: float = 0.05          # голый расплав Al
-    eps_oxide: float = 0.35          # сплошная альфа-Al2O3 при 1800 K
+    T_boil_1atm: float = 2792.0
+    L_vapour: float = 10.90e6
+    boil_at_local_pressure: bool = True
+    p_nominal: float = 1.0e3      # Па, для сводных оценок (энергия, Pi)
 
-    def eps_at(self, t):
-        """Излучательная способность в момент t, с начала полёта фрагмента."""
-        if self.tau_oxide is None:
-            return self.emissivity
-        x = np.sqrt(np.maximum(np.asarray(t, dtype=float), 0.0) / self.tau_oxide)
-        return self.eps_metal + (self.eps_oxide - self.eps_metal) * (
-            1.0 - np.exp(-x))
+    emissivity: float = 0.10
+    surface: str = "constant"
+    tau_oxide: float | None = None
+    film_shape: tuple = (0.05, 0.95, 1.6)   # eps_short, eps_long, width
+
+    @classmethod
+    def legacy(cls, **kw):
+        """Свойства первой версии: c_p = 900 везде, T_melt = 933 K,
+        кипение 2740 K при любом давлении, L = 10.5 МДж/кг. Только для
+        сравнения "было -> стало"."""
+        base = dict(c_p=900.0, c_p_liquid=900.0, T_melt=933.0,
+                    T_boil_1atm=2740.0, L_vapour=10.5e6,
+                    boil_at_local_pressure=False)
+        base.update(kw)
+        return cls(**base)
+
+    # --- кипение ---------------------------------------------------------
+
+    def T_boil_at(self, p):
+        """Температура кипения при давлении p, K."""
+        if not self.boil_at_local_pressure:
+            return np.full_like(np.asarray(p, dtype=float), self.T_boil_1atm)
+        p = np.maximum(np.asarray(p, dtype=float), 1e-6)
+        inv = 1.0 / self.T_boil_1atm - R_GAS / (M_AL * self.L_vapour) * np.log(p / P_ATM)
+        return 1.0 / inv
+
+    def L_vapour_at(self, T_boil):
+        """Теплота испарения при температуре кипения T_boil, Дж/кг."""
+        if not self.boil_at_local_pressure:
+            return np.full_like(np.asarray(T_boil, dtype=float), self.L_vapour)
+        return self.L_vapour + DCP_VAPOUR * (np.asarray(T_boil) - self.T_boil_1atm)
+
+    @property
+    def T_boil_nominal(self) -> float:
+        """T кипения при p_nominal (1 кПа) — для сводных оценок."""
+        return float(self.T_boil_at(self.p_nominal))
+
+    # --- энтальпия -------------------------------------------------------
+
+    @property
+    def h1(self) -> float:
+        """Начало плавления, Дж/кг."""
+        return self.c_p * (self.T_melt - self.T_initial)
+
+    @property
+    def h2(self) -> float:
+        """Конец плавления, Дж/кг."""
+        return self.h1 + self.L_fusion
+
+    def h3(self, T_boil):
+        """Начало кипения при данной T_кип, Дж/кг."""
+        return self.h2 + self.c_p_liquid * (np.asarray(T_boil) - self.T_melt)
 
     @property
     def h_melt_complete(self) -> float:
         """Энергия на килограмм до полного расплавления, Дж/кг.
 
-        Критерий ORSAT: 934.5 кДж/кг для generic aluminum. Наш расчёт даёт
-        900*(933-300) + 397e3 = 0.97 МДж/кг — совпадение в пределах 4%,
-        то есть мы воспроизводим их критерий, а не изобретаем свой.
+        Критерий ORSAT: 934.5 кДж/кг для generic aluminum (NTRS 20140016958).
         """
-        return self.c_p * (self.T_melt - self.T_initial) + self.L_fusion
+        return self.h2
 
     @property
     def h_vapour_complete(self) -> float:
-        """Энергия на килограмм до полного испарения, Дж/кг."""
-        return (self.h_melt_complete
-                + self.c_p * (self.T_boil - self.T_melt) + self.L_vapour)
+        """Энергия на килограмм до полного испарения при p_nominal, Дж/кг."""
+        Tb = self.T_boil_nominal
+        return float(self.h3(Tb) + self.L_vapour_at(Tb))
 
     @property
     def demise_ratio(self) -> float:
         """Во сколько раз испарение дороже плавления."""
         return self.h_vapour_complete / self.h_melt_complete
 
+    # --- излучение -------------------------------------------------------
 
-def temperature_from_enthalpy(h_s, mat: "Aluminium"):
+    def emissivity_at(self, T, t_since_surface: float = 0.0):
+        """Полная полусферическая eps при температуре T (массив)."""
+        from .emissivity import bare_aluminium_emissivity, oxide_film_emissivity
+        T = np.asarray(T, dtype=float)
+        if self.tau_oxide is not None:
+            g = 1.0 - np.exp(-np.sqrt(max(t_since_surface, 0.0) / self.tau_oxide))
+            e_b = bare_aluminium_emissivity(T)
+            return e_b + (oxide_film_emissivity(*self.film_shape)(T) - e_b) * g
+        if self.surface == "oxide":
+            return oxide_film_emissivity(*self.film_shape)(T)
+        if self.surface == "bare":
+            return bare_aluminium_emissivity(T)
+        return np.full_like(T, self.emissivity)
+
+    def label(self) -> str:
+        if self.tau_oxide is not None:
+            return f"рост плёнки tau={self.tau_oxide:g} с"
+        return {"oxide": "плёнка активна", "bare": "голый расплав"}.get(
+            self.surface, f"eps={self.emissivity:.2f}")
+
+
+def temperature_from_enthalpy(h_s, mat: Aluminium, T_boil=None):
     """T(h_s) — монотонная кусочная функция с ПОЛКАМИ на фазовых переходах.
 
     Именно так фазовые переходы попадают в правую часть ОДУ без ветвления:
     состояние — удельная энтальпия, а температура из неё выводится.
 
-        h1 = c_p*(T_пл - T0)               начало плавления
-        h2 = h1 + L_пл                     конец плавления
-        h3 = h2 + c_p*(T_кип - T_пл)       начало кипения
+        h1 = c_p(тв)*(T_пл - T0)                начало плавления
+        h2 = h1 + L_пл                          конец плавления
+        h3 = h2 + c_p(ж)*(T_кип - T_пл)         начало кипения
+
+    T_boil — температура кипения при текущем местном давлении.
     """
-    h1 = mat.c_p * (mat.T_melt - mat.T_initial)
-    h2 = h1 + mat.L_fusion
-    h3 = h2 + mat.c_p * (mat.T_boil - mat.T_melt)
+    if T_boil is None:
+        T_boil = mat.T_boil_nominal
+    h1, h2 = mat.h1, mat.h2
+    h3 = mat.h3(T_boil)
     h = np.asarray(h_s, dtype=float)
     return np.where(
         h < h1, mat.T_initial + h / mat.c_p,
         np.where(h < h2, mat.T_melt,
-                 np.where(h < h3, mat.T_melt + (h - h2) / mat.c_p, mat.T_boil)))
-
-
-def thermal_history(traj, vehicle, material: "Aluminium",
-                    correlation: str = "sutton-graves") -> dict:
-    """ВЕРХНЯЯ ГРАНИЦА: сосредоточенная тепловая модель, честно проинтегрированная.
-
-    ПОЧЕМУ НЕЛЬЗЯ ПРОСТО ПОДЕЛИТЬ ЭНЕРГИЮ НА ТЕПЛОТУ ПЛАВЛЕНИЯ. Переизлучение
-    зависит от температуры, температура — от накопленной энтальпии. Отношение
-    "поглощённая энергия / теплота плавления" не зависит от eps вообще, а
-    физически eps решает всё: он задаёт равновесную температуру.
-
-    Постоянная времени тут не запас: для целого объекта m*c_p = 1.6e5 Дж/К,
-    приход ~9e5 Вт, то есть ~6 К/с, и до плавления надо ~110 с при полётном
-    времени высокого потока ~100 с. Плавление у крупного тела МАРГИНАЛЬНО,
-    и это видно только при честном интегрировании.
-
-        dh_s/dt = (A_омыв/m) * (phi*q_stag*(1-h_w/h_0) - eps*sigma*T(h_s)^4)
-    """
-    from scipy.integrate import solve_ivp
-    from scipy.interpolate import CubicSpline
-
-    from .heating import SHAPE_FACTOR_TUMBLING
-
-    V = traj.V_rel if traj.V_rel is not None else traj.V
-    q_raw = traj.heat_flux(vehicle, correlation)
-    q_spline = CubicSpline(traj.t, q_raw)
-    V_spline = CubicSpline(traj.t, V)
-
-    A_over_m = vehicle.wetted / vehicle.mass
-    eps_sig = material.emissivity * SIGMA_SB
-
-    def rhs(t, y):
-        T = float(temperature_from_enthalpy(y[0], material))
-        q = float(q_spline(t)) * float(hot_wall_factor(float(V_spline(t)), T))
-        return [A_over_m * (SHAPE_FACTOR_TUMBLING * max(q, 0.0) - eps_sig * T ** 4)]
-
-    sol = solve_ivp(rhs, (traj.t[0], traj.t[-1]), [0.0], method="LSODA",
-                    t_eval=traj.t, rtol=1e-8, atol=1e-3, max_step=2.0)
-    h_s = np.maximum(sol.y[0], 0.0)
-    T = temperature_from_enthalpy(h_s, material)
-
-    h1 = material.c_p * (material.T_melt - material.T_initial)
-    h2 = h1 + material.L_fusion
-    # Доля массы, доведённая до расплава: полка плавления пройдена целиком
-    # -> 100%; пройдена частично -> линейная доля.
-    hmax = float(h_s.max())
-    frac = 0.0 if hmax <= h1 else min(1.0, (hmax - h1) / material.L_fusion)
-    return {"t": traj.t, "h_s": h_s, "T": T, "T_peak": float(T.max()),
-            "fraction": frac, "mass": frac * vehicle.mass,
-            "specific": hmax}
-
-
-def melted_fraction(traj, vehicle, material: Aluminium,
-                    correlation: str = "sutton-graves") -> dict:
-    """Совместимая обёртка над thermal_history."""
-    return thermal_history(traj, vehicle, material, correlation)
-
-
-def vaporized_mass(traj, vehicle, material: Aluminium,
-                   correlation: str = "sutton-graves") -> dict:
-    """НИЖНЯЯ ГРАНИЦА: масса, испарённая НА МЕСТЕ.
-
-    Локальный температурный критерий по УГЛОВОМУ РАСПРЕДЕЛЕНИЮ потока,
-    а не по среднему. Среднее в пороговой задаче с T^4 систематически
-    занижает: испарение идёт там, где поток выше среднего, а среднее
-    этого места не видит.
-    """
-    V = traj.V_rel if traj.V_rel is not None else traj.V
-    q_s = traj.heat_flux(vehicle, correlation) * hot_wall_factor(V, material.T_boil)
-
-    mdot = vaporization_rate(q_s, vehicle.wetted, material.emissivity,
-                             material.T_boil, material.L_vapour)
-    m_vap = float(np.trapezoid(mdot, traj.t))
-    frac_area = vaporizing_area_fraction(q_s, material.emissivity, material.T_boil)
-    return {"mass": min(m_vap, vehicle.mass),
-            "fraction": min(m_vap / vehicle.mass, 1.0),
-            "peak_area_fraction": float(np.max(frac_area)),
-            "mdot_peak": float(np.max(mdot))}
-
-
-def bracket(traj, vehicle, material: Aluminium) -> dict:
-    """Обе границы разом плюс доля алюминия."""
-    up = melted_fraction(traj, vehicle, material)
-    lo = vaporized_mass(traj, vehicle, material)
-    f_al = vehicle.al_mass_fraction
-    return {
-        "melt": up, "vapour": lo,
-        "al_upper_kg": up["mass"] * f_al,
-        "al_lower_kg": lo["mass"] * f_al,
-        "width": (up["mass"] / lo["mass"]) if lo["mass"] > 0 else np.inf,
-    }
+                 np.where(h < h3, mat.T_melt + (h - h2) / mat.c_p_liquid, T_boil)))
 
 
 # ---------------------------------------------------------------------------
-# ПОЭЛЕМЕНТНАЯ модель поверхности — одна согласованная схема вместо двух
+# Критерии режимов
 # ---------------------------------------------------------------------------
-
-K_ALUMINIUM = 167.0      # Вт/(м*К), теплопроводность Al 6061 (~10%)
-RHO_ALUMINIUM = 2700.0   # кг/м^3
-
 
 def thermal_diffusion_depth(t_flight: float, k=K_ALUMINIUM,
                             rho=RHO_ALUMINIUM, c_p=900.0) -> float:
@@ -235,157 +236,209 @@ def thermal_diffusion_depth(t_flight: float, k=K_ALUMINIUM,
     return float(np.sqrt(k / (rho * c_p) * t_flight))
 
 
-def areal_heat_capacity(thickness: float, rho=RHO_ALUMINIUM,
-                        c_p=900.0) -> float:
-    """Поверхностная теплоёмкость rho*c_p*delta, Дж/(м^2*К)."""
-    return rho * c_p * thickness
+def areal_mass(vehicle, t_flight: float) -> float:
+    """Масса на единицу ОМЫВАЕМОЙ площади, участвующая в прогреве, кг/м^2.
+
+    m / A_омыв, но не больше rho * глубина прогрева. Для пластины толщины t
+    это rho*t/2: омываемая площадь — обе грани.
+    """
+    return min(vehicle.mass / vehicle.wetted,
+               RHO_ALUMINIUM * thermal_diffusion_depth(t_flight))
 
 
-def regime_number(traj, vehicle, material: "Aluminium",
-                  wall_thickness: float | None = None) -> dict:
+def regime_number(traj, vehicle, material: Aluminium) -> dict:
     """Pi = доступная энергия / энергия, нужная чтобы дойти до кипения.
 
     ЭТО и есть разделитель режимов, а не глубина прогрева.
 
-        Pi = phi * int(q_stag dt)  /  (rho*c_p*delta * (T_кип - T0))
+        Pi = phi * int(q_stag dt)  /  (m'' * h_кип)
+
+    m'' — масса на единицу омываемой площади (для пластины rho*t/2, для
+    оболочки m/A_омыв), h_кип — энтальпия от T0 до начала кипения при
+    номинальном давлении 1 кПа.
 
     Pi >> 1 — тело выходит на радиационное равновесие, дальше всё решает eps.
     Pi << 1 — энергии не хватает даже на разогрев, задача ЭНЕРГЕТИЧЕСКАЯ,
               eps почти не влияет, потому что переизлучение мало.
-
-    Численно: стенка 16 мм даёт поверхностную теплоёмкость 39 кДж/(м^2*К),
-    до кипения нужно 96 МДж/м^2, доступно 24 -> Pi = 0.26.
-    Пластина 1 мм: 2.4 кДж/(м^2*К), нужно 5.9 МДж/м^2, доступно 42 -> Pi = 7.1.
-    Разница в 27 раз, и она объясняет всё поведение.
     """
     from .heating import SHAPE_FACTOR_TUMBLING
-    if wall_thickness is None:
-        wall_thickness = vehicle.mass / (RHO_ALUMINIUM * vehicle.wetted)
-    C = areal_heat_capacity(wall_thickness)
-    need = C * (material.T_boil - material.T_initial)
+    t_flight = float(traj.t[-1] - traj.t[0])
+    m_area = areal_mass(vehicle, t_flight)
+    h_boil = float(material.h3(material.T_boil_nominal))
+    need = m_area * h_boil
     avail = SHAPE_FACTOR_TUMBLING * traj.heat_load(vehicle)
-    return {"Pi": avail / need, "areal_C": C, "need": need, "available": avail,
-            "thickness": wall_thickness,
+    return {"Pi": avail / need, "areal_mass": m_area,
+            "equiv_thickness": m_area / RHO_ALUMINIUM,
+            "need": need, "available": avail,
             "regime": "радиационный" if avail > need else "энергетический"}
 
+
+# ---------------------------------------------------------------------------
+# ПОЭЛЕМЕНТНАЯ модель поверхности — одна согласованная схема
+# ---------------------------------------------------------------------------
 
 def surface_thermal_model(traj, vehicle, material: Aluminium,
                           wall_thickness: float | None = None,
                           n_bands: int = 24,
-                          correlation: str = "sutton-graves") -> dict:
+                          correlation: str = "sutton-graves",
+                          flux_mode: str = "cos",
+                          blowing_eta: float = 0.0,
+                          n_out: int = 1200) -> dict:
     """Поэлементный энергобаланс по угловому распределению потока.
 
-    ЗАЧЕМ ЭТО ВМЕСТО ДВУХ ОТДЕЛЬНЫХ УЧЁТОВ. Сосредоточенная модель с одной
-    температурой и локальный критерий испарения давали несогласованный ответ:
-    у толстого тела первая говорила "расплава 0%", вторая — "испарилось 1.6%".
-    Обе правы по-своему, но вилка из них не складывается, потому что это два
-    разных счёта, а не границы одного.
+    Поверхность делится на пояса по углу theta от точки торможения. Каждый пояс:
+      - получает q_stag * cos(theta) * (1 - h_w/h_0)
+      - переизлучает sides * eps(T) * sigma * T^4 при СВОЕЙ температуре
+        (sides = 2 для пластины: тыльная сторона излучает тоже)
+      - имеет свою участвующую массу rho*t_стенки*dA
+      - проходит фазовые переходы через полки T(h_s); полка кипения стоит
+        на T_кип(p_торм(t)) и сдвигается вниз по мере падения давления
+      - испаряет не больше своей массы: выкипевший пояс исчезает (прогар)
+        и перестаёт получать и излучать
 
-    Здесь один счёт. Поверхность делится на пояса по углу theta от точки
-    торможения. Каждый пояс:
-      - получает q_stag * cos(theta)  (угловое распределение, без параметров)
-      - переизлучает eps*sigma*T^4 при СВОЕЙ температуре
-      - имеет свою участвующую массу rho*t_стенки на единицу площади
-      - проходит свои фазовые переходы через полки T(h_s)
+    Расплавленная и испарённая массы получаются из ОДНОГО поля температуры.
+    Расплав считается по МАКСИМУМУ энтальпии пояса за полёт: пояс, который
+    расплавился и потом остыл, расплавленным быть не перестал. Испарение
+    идёт только выше полки кипения, поэтому в каждом поясе испарено <=
+    расплавлено <= масса пояса — по построению, без принудительного max().
 
-    Тогда расплавленная и испарённая массы получаются из ОДНОГО поля
-    температуры, и вилка между ними имеет смысл: расплав — это всё, что
-    в принципе может стать оксидом, испарение на месте — то, что точно им
-    стало. Разница — судьба сорванного расплава.
+    flux_mode:
+      "cos"      устойчивая ориентация: греется освещённая половина
+                 поверхности, распределение cos(theta), без свободных
+                 параметров. Для оболочки подветренная половина массы в
+                 нагреве не участвует — расплав оболочки не больше 50%.
+      "uniform"  быстрое кувыркание: каждый элемент всей омываемой
+                 поверхности получает средний поток 0.25*q_stag. Предел,
+                 когда период кувыркания много меньше тепловой постоянной
+                 времени стенки (~5 с для пластины 1 мм).
 
-    Толщина стенки: для пластины известна, для компактного фрагмента берётся
-    эквивалентная оболочка t = m/(rho*A_омыв). Ограничена сверху глубиной
-    прогрева: глубже тепло за полёт не доходит.
+    blowing_eta: блокировка потока вдувом пара в кипящих поясах,
+      q_исп = (q_in - rad) / (1 + eta*(h_0 - h_w)/L). 0 — выключено (база).
+
+    Толщина стенки: для пластины — её толщина, для компактного фрагмента —
+    эквивалентная оболочка m/(rho*A_омыв). Ограничена сверху глубиной
+    прогрева.
     """
     from scipy.integrate import solve_ivp
     from scipy.interpolate import CubicSpline
 
+    t0, t1 = float(traj.t[0]), float(traj.t[-1])
     V = traj.V_rel if traj.V_rel is not None else traj.V
     q_spline = CubicSpline(traj.t, traj.heat_flux(vehicle, correlation))
     V_spline = CubicSpline(traj.t, V)
     h_spline = CubicSpline(traj.t, traj.h)
+    lnp_spline = CubicSpline(
+        traj.t, np.log(np.maximum(stagnation_pressure(traj.rho, V), 1e-9)))
 
-    if wall_thickness is None:
+    depth = thermal_diffusion_depth(t1 - t0)
+    if flux_mode == "cos":
+        if wall_thickness is None:
+            wall_thickness = vehicle.mass / (RHO_ALUMINIUM * vehicle.wetted)
+        heated_area = vehicle.wetted / 2.0
+        sides = float(vehicle.radiating_sides)
+        # Пояса по theta, равные ПО ПЛОЩАДИ (равные шаги по cos(theta)).
+        mu_edges = np.linspace(1.0, 0.0, n_bands + 1)
+        flux_frac = 0.5 * (mu_edges[:-1] + mu_edges[1:])
+    elif flux_mode == "uniform":
+        # Вся омываемая поверхность, средний поток; обе грани пластины уже
+        # входят в омываемую площадь, поэтому каждый элемент излучает одной
+        # стороной, а масса на единицу площади — m/A_омыв.
         wall_thickness = vehicle.mass / (RHO_ALUMINIUM * vehicle.wetted)
-    depth = thermal_diffusion_depth(float(traj.t[-1] - traj.t[0]))
+        heated_area = vehicle.wetted
+        sides = 1.0
+        flux_frac = np.full(n_bands, 0.25)
+    else:
+        raise ValueError(f"flux_mode: {flux_mode!r}")
+
     t_eff = min(wall_thickness, depth)          # участвующая толщина
     lumped_valid = wall_thickness <= depth
-
-    # Пояса по theta, равные ПО ПЛОЩАДИ (площадь ~ sin(th) dth, то есть
-    # равные шаги по cos(th)). Считаем только освещённую полусферу: за
-    # миделем f(theta)=0, эти пояса не греются и в систему не нужны.
-    # Их площадь учитывается тем, что dA берётся от полной поверхности.
-    mu_edges = np.linspace(1.0, 0.0, n_bands + 1)       # cos(theta), 0..90 град
-    mu = 0.5 * (mu_edges[:-1] + mu_edges[1:])
-    flux_frac = mu                                      # f(theta) = cos(theta)
-    dA = vehicle.wetted / (2.0 * n_bands)               # половина поверхности
-
-    use_growth = material.tau_oxide is not None
-    m_band = RHO_ALUMINIUM * t_eff * dA                 # участвующая масса пояса
-    h3 = (material.c_p * (material.T_melt - material.T_initial)
-          + material.L_fusion
-          + material.c_p * (material.T_boil - material.T_melt))
+    dA = heated_area / n_bands
+    m_band = RHO_ALUMINIUM * t_eff * dA
+    n = n_bands
+    mat = material
+    h1 = mat.h1
 
     def rhs(t, y):
-        h_s = y[:n_bands]
-        T = temperature_from_enthalpy(h_s, material)
-        q = float(q_spline(t)) * hot_wall_factor(float(V_spline(t)), T)
-        eps_t = material.eps_at(t - traj.t[0]) if use_growth else material.emissivity
-        q_in = np.maximum(q, 0.0) * flux_frac
-        rad = eps_t * SIGMA_SB * T ** 4
-        net = q_in - rad
-        # Переключение "греется / кипит" СГЛАЖЕНО по узкому окну энтальпии.
-        # Жёсткий np.where даёт разрыв правой части, на котором LSODA
-        # захлёбывается: тонкая пластина считалась 14 с вместо долей секунды.
-        # Окно 1% от h3 физически неразличимо, численно решает всё.
-        w = np.clip((h_s - h3) / (0.01 * h3), 0.0, 1.0)
+        h_s = y[:n]
+        m_v = y[n:2 * n]
+        T_b = float(mat.T_boil_at(np.exp(float(lnp_spline(t)))))
+        L_v = float(mat.L_vapour_at(T_b))
+        h3 = float(mat.h3(T_b))
+        T = temperature_from_enthalpy(h_s, mat, T_b)
+        V_now = float(V_spline(t))
+        q = max(float(q_spline(t)), 0.0) * hot_wall_factor(V_now, T)
+        eps = mat.emissivity_at(T, t - t0)
 
-        # ЗАЖИМ ТОЛЬКО НА НАГРЕВ. Пояс на кипении, у которого приход упал
-        # ниже переизлучения, обязан ОСТЫВАТЬ. Симметричный зажим (1-w)*net
-        # запрещал это и заставлял пояс излучать энергию, которой у него нет:
-        # энергетический баланс расходился на 50%. Поймано test_energy_balance.
+        # Выкипевший пояс исчезает. Сглажено по 1% массы пояса.
+        alive = np.clip((m_band - m_v) / (0.01 * m_band), 0.0, 1.0)
+        q_in = q * flux_frac * alive
+        rad = sides * eps * SIGMA_SB * T ** 4 * alive
+        net = q_in - rad
+
+        # Переключение "греется / кипит" СГЛАЖЕНО по окну 1% от h3: жёсткий
+        # разрыв правой части LSODA проходит в 200 раз медленнее.
+        # ЗАЖИМ ТОЛЬКО НА НАГРЕВ: пояс на кипении, у которого приход упал
+        # ниже переизлучения, обязан остывать, иначе он излучал бы энергию,
+        # которой у него нет.
+        w = np.clip((h_s - h3) / (0.01 * h3), 0.0, 1.0)
         pos = np.maximum(net, 0.0)
         neg = np.minimum(net, 0.0)
-        dh = (neg + (1.0 - w) * pos) / (RHO_ALUMINIUM * t_eff)
-        dm_vap = np.sum(w * pos * dA) / material.L_vapour
 
-        # Аудит: приход и переизлучение по всей освещённой поверхности.
-        # Разбиение точное: neg + (1-w)*pos + w*pos = net = q_in - rad,
-        # поэтому баланс замыкается по построению.
-        return np.concatenate([dh, [dm_vap, float(np.sum(q_in) * dA),
-                                    float(np.sum(rad) * dA)]])
+        # Вдув: часть избытка потока в кипящем поясе блокируется паром.
+        dh_gas = max(0.5 * V_now ** 2 - CP_AIR_HOT * T_b, 0.0)
+        evap = w * pos / (1.0 + blowing_eta * dh_gas / L_v)
+        block = w * pos - evap
 
-    y0 = np.zeros(n_bands + 3)
-    # Сетка вывода реже траекторной: тепловая задача меняется медленнее,
-    # а стоимость растёт линейно по числу точек вывода.
-    t_out = np.linspace(traj.t[0], traj.t[-1], 400)
-    sol = solve_ivp(rhs, (traj.t[0], traj.t[-1]), y0, method="LSODA",
-                    t_eval=t_out, rtol=1e-6, atol=1e-1, max_step=5.0)
-    h_end = sol.y[:n_bands, -1]
-    m_vap_series = sol.y[n_bands]
-    E_in = float(sol.y[n_bands + 1, -1])
-    E_rad = float(sol.y[n_bands + 2, -1])
-    E_stored = float(np.sum(h_end * RHO_ALUMINIUM * t_eff * dA))
-    E_vap = float(m_vap_series[-1] * material.L_vapour)
-    residual = (E_in - E_rad - E_stored - E_vap) / E_in if E_in > 0 else 0.0
-    T_end = temperature_from_enthalpy(h_end, material)
+        # Вскипание перегретого расплава, когда T_кип падает с давлением.
+        flash = np.maximum(h_s - 1.01 * h3, 0.0) / TAU_FLASH * alive
 
-    h1 = material.c_p * (material.T_melt - material.T_initial)
-    melt_frac_band = np.clip((h_end - h1) / material.L_fusion, 0.0, 1.0)
-    m_melt = float(np.sum(melt_frac_band * m_band))
-    m_vap = float(min(m_vap_series[-1], vehicle.mass))
-    # Испарённое — часть расплавленного: расплав есть необходимая стадия
-    m_melt = max(m_melt, m_vap)
+        dh = (neg + (1.0 - w) * pos) / (RHO_ALUMINIUM * t_eff) - flash
+        dm = evap * dA / L_v + m_band * flash / L_v
 
+        # Аудит внутри той же системы ОДУ. Разбиение точное:
+        # q_in - rad = [neg + (1-w)pos] + evap + block, и m_band*flash
+        # переходит из запаса в испарение.
+        return np.concatenate([dh, dm, [
+            float(np.sum(q_in) * dA),
+            float(np.sum(rad) * dA),
+            float(np.sum(evap) * dA + np.sum(m_band * flash)),
+            float(np.sum(block) * dA)]])
+
+    y0 = np.zeros(2 * n + 4)
+    atol = np.concatenate([np.full(n, 1e-1), np.full(n, 1e-7 * max(m_band, 1e-9)),
+                           np.full(4, 1e-1)])
+    t_out = np.linspace(t0, t1, n_out)
+    sol = solve_ivp(rhs, (t0, t1), y0, method="LSODA", t_eval=t_out,
+                    rtol=1e-6, atol=atol, max_step=5.0)
+
+    H = sol.y[:n]
+    MV = sol.y[n:2 * n]
+    h_end = H[:, -1]
+    m_vap_band = MV[:, -1]
+    E_in, E_rad, E_vap, E_block = (float(sol.y[2 * n + k, -1]) for k in range(4))
+    E_stored = float(np.sum(h_end * m_band))
+    residual = (E_in - E_rad - E_stored - E_vap - E_block) / E_in if E_in > 0 else 0.0
+
+    melt_frac_band = np.clip((H.max(axis=1) - h1) / mat.L_fusion, 0.0, 1.0)
+    m_melt_band = melt_frac_band * m_band
+    m_vap_series = MV.sum(axis=0)
+    p_series = np.exp(lnp_spline(sol.t))
+    Tb_series = mat.T_boil_at(p_series)
+    T_end = temperature_from_enthalpy(h_end, mat, float(Tb_series[-1]))
+
+    m_melt = float(m_melt_band.sum())
+    m_vap = float(m_vap_band.sum())
     return {
-        "m_melt": min(m_melt, vehicle.mass), "m_vap": m_vap,
-        "f_melt": min(m_melt, vehicle.mass) / vehicle.mass,
-        "f_vap": m_vap / vehicle.mass,
-        "T_max": float(T_end.max()), "T_nose": float(T_end[0]),
+        "m_melt": m_melt, "m_vap": m_vap,
+        "f_melt": m_melt / vehicle.mass, "f_vap": m_vap / vehicle.mass,
+        "T_max": float(temperature_from_enthalpy(H.max(), mat,
+                                                 float(Tb_series.max()))),
+        "T_nose_end": float(T_end[0]),
         "wall_thickness": wall_thickness, "participating": t_eff,
         "lumped_valid": lumped_valid, "diffusion_depth": depth,
-        "m_vap_series": m_vap_series, "t": sol.t,
-        "h": h_spline(sol.t),
+        "m_band": m_band, "m_vap_band": m_vap_band, "m_melt_band": m_melt_band,
+        "m_vap_series": m_vap_series, "t": sol.t, "h": h_spline(sol.t),
+        "p_stag": p_series, "T_boil": Tb_series,
         "E_in": E_in, "E_rad": E_rad, "E_stored": E_stored, "E_vap": E_vap,
-        "energy_residual": residual,
+        "E_block": E_block, "energy_residual": residual,
     }

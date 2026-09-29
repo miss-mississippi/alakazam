@@ -3,6 +3,7 @@
 Запуск:  python run_step4.py
 
 Выход: step4_epsilon.png, step4_bracket.png и таблицы в консоли.
+Сверка с Ferreira — в run_step5.py (раздел D).
 """
 
 from __future__ import annotations
@@ -12,305 +13,260 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from reentry import EntryState, MSISAtmosphere, Vehicle, integrate
-from reentry.ablation import (Aluminium, regime_number,
-                             surface_thermal_model, thermal_diffusion_depth)
-from reentry.heating import (SHAPE_FACTOR_TUMBLING, SIGMA_SB, hot_wall_factor,
-                             vaporizing_area_fraction, vaporization_rate)
+import run_step5 as S
+from reentry import Vehicle, integrate
+from reentry.ablation import Aluminium, regime_number, surface_thermal_model
+from reentry.heating import SIGMA_SB
+from reentry.results import Recorder
 
 plt.rcParams.update({
     "figure.dpi": 130, "font.size": 9, "axes.grid": True, "grid.alpha": 0.25,
     "axes.spines.top": False, "axes.spines.right": False,
 })
 
-ATM = MSISAtmosphere()
-ENTRY = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5,
-                   inclination_deg=53.0)
-M0, CD = 175.0, 1.5
-INTACT = Vehicle(mass=M0, area=1.0, Cd=CD, nose_radius=0.5)
+ATM, ENTRY, CD, M0, INTACT = S.ATM, S.ENTRY, S.CD, S.M0, S.INTACT
+EPS_GRID = np.array([0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35])
+SCEN_KEY = {"плёнка активна": "film", "голый расплав": "bare"}
+R = Recorder("step4")
 
-# Диапазон эмиссивности — физический, не подгоночный.
-# 0.05  голый жидкий Al (блестящий жидкий металл)
-# 0.10  расплав с тонкой плёнкой
-# 0.20  промежуточное
-# 0.35  сплошная альфа-Al2O3 (0.83 при 300 K -> 0.35 при 1800 K, ПАДАЕТ с T)
-EPS_GRID = np.array([0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35])
-
-# Список фрагментов. Каждый — либо ПЛАСТИНА (задаётся толщиной, beta из неё
-# выводится), либо КОМПАКТНЫЙ (задаётся beta, Rn как сфероэквивалент).
-# SESAM по умолчанию: панели 95 км, корпус 78 км (Lips, SDC6).
-FRAGMENTS = [
-    # имя, доля массы, высота отделения, вид, параметр
-    ("солнечные панели", 0.10, 95.0e3, "plate", 1.5e-3),
-    ("силовой набор", 0.50, 78.0e3, "compact", 55.0),
-    ("мелкие элементы, MLI", 0.40, 78.0e3, "plate", 1.0e-3),
-]
+# Пластина 1 мм массой 1 кг, летящая ОТ ТОЧКИ ВХОДА 120 км — иллюстрация
+# радиационного режима. Это не фрагмент "мелкие элементы" (тот стартует с
+# высоты разрушения 78 км со скоростью целого объекта), поэтому цифры у них
+# разные.
+THIN = Vehicle.plate(1.0, 1.0e-3, Cd=CD)
 
 
-def fragment_vehicle(mass_fraction: float, kind: str, param: float):
-    """-> (Vehicle, толщина стенки). Для пластины толщина известна."""
-    m = M0 * mass_fraction
-    if kind == "plate":
-        return Vehicle.plate(m, param, Cd=CD), param
-    return Vehicle.compact(m, param, Cd=CD), None
-
-
-def report_criteria(mat: Aluminium):
+def report_criteria():
+    mat = Aluminium()
     print("A. ДВА КРИТЕРИЯ ДЕМИЗА")
     print(f"   до полного расплава      {mat.h_melt_complete/1e6:6.2f} МДж/кг"
           f"   <- критерий ORSAT/DRAMA (у них 0.93)")
     print(f"   до полного испарения     {mat.h_vapour_complete/1e6:6.2f} МДж/кг"
-          f"   <- то, что нужно атмосферной химии")
+          f"   <- то, что нужно атмосферной химии (при 1 кПа)")
     print(f"   отношение                {mat.demise_ratio:6.1f}x\n")
-    print("   Между ними — судьба сорванного расплава: капля может испариться")
-    print("   дальше, может окислиться по поверхности и выпасть сферулой, может")
-    print("   застыть целиком. Ни одна текущая модель этого не разрешает.")
-    print("   Поэтому результат — ВИЛКА, и её ширина есть физический результат.\n")
+    R["criteria.melt"] = mat.h_melt_complete / 1e6
+    R["criteria.vapour"] = mat.h_vapour_complete / 1e6
+    R["criteria.ratio"] = mat.demise_ratio
+    R["criteria.h1"] = mat.h1 / 1e6
+    R["criteria.h2"] = mat.h2 / 1e6
+    print("   Температура кипения Al на поверхности — при давлении торможения:")
+    for p in (1e2, 3e2, 1e3, 3e3, 101325.0):
+        Tb = float(mat.T_boil_at(p))
+        R[f"boil.p{p:.0f}.T"] = Tb
+        R[f"boil.p{p:.0f}.L"] = float(mat.L_vapour_at(Tb)) / 1e6
+        R[f"boil.p{p:.0f}.h3"] = float(mat.h3(Tb)) / 1e6
+        print(f"     p = {p:>8.0f} Па  ->  T_кип = {float(mat.T_boil_at(p)):6.0f} K,"
+              f"  L = {float(mat.L_vapour_at(mat.T_boil_at(p)))/1e6:5.2f} МДж/кг")
+    from reentry.heating import SHAPE_FACTOR_TUMBLING
+    for tag, Tb in (("atm", mat.T_boil_1atm), ("kpa", mat.T_boil_nominal)):
+        for e in (0.3, 0.2):
+            q = e * SIGMA_SB * Tb ** 4 / SHAPE_FACTOR_TUMBLING / 1e4
+            R[f"threshold.{tag}.e{round(e*100):02d}"] = q
+    print("   Порог кипения при среднем потоке eps*sigma*T^4/phi, Вт/см^2:")
+    print(f"     1 атм ({mat.T_boil_1atm:.0f} K): eps=0.3 -> "
+          f"{0.3*SIGMA_SB*mat.T_boil_1atm**4/SHAPE_FACTOR_TUMBLING/1e4:.0f}, "
+          f"eps=0.2 -> {0.2*SIGMA_SB*mat.T_boil_1atm**4/SHAPE_FACTOR_TUMBLING/1e4:.0f}")
+    print(f"     1 кПа ({mat.T_boil_nominal:.0f} K): eps=0.3 -> "
+          f"{0.3*SIGMA_SB*mat.T_boil_nominal**4/SHAPE_FACTOR_TUMBLING/1e4:.0f}, "
+          f"eps=0.2 -> {0.2*SIGMA_SB*mat.T_boil_nominal**4/SHAPE_FACTOR_TUMBLING/1e4:.0f}")
+    print("\n   Между расплавом и паром — судьба сорванного расплава: капля может")
+    print("   испариться дальше, окислиться по поверхности и выпасть сферулой,")
+    print("   застыть целиком. Поэтому результат — ВИЛКА.\n")
 
 
-def report_epsilon(mat: Aluminium):
-    print("B. ЭМИССИВНОСТЬ — ГЛАВНАЯ ОСЬ")
-    print("   При 1900 K излучает не окисленный ТВЁРДЫЙ Al, а расплав с")
-    print("   оксидной плёнкой. У альфа-Al2O3 эмиссивность с ростом T ПАДАЕТ:")
-    print("   0.83 при 300 K -> 0.35 при 1800 K. Голый жидкий Al ~0.05.")
-    print("   Физическая вилка 0.05-0.35, фактор 7. Порог кипения ~ eps.\n")
+def report_epsilon():
+    print("B. ЭМИССИВНОСТЬ: ГДЕ ОНА РЕШАЕТ, А ГДЕ НЕТ")
+    print("   Целый объект и пластина 1 мм (1 кг), обе ОТ ТОЧКИ ВХОДА 120 км.\n")
     tr = integrate(INTACT, ENTRY, ATM)
-    print(f"   ЦЕЛЫЙ ОБЪЕКТ (m={M0:.0f} кг, beta={INTACT.ballistic_coefficient:.0f}):")
-    print(f"   {'eps':>6}{'T носа, K':>12}{'расплав':>10}{'испарено':>11}"
-          f"      || тонкая пластина 1 мм:{'T носа':>9}{'расплав':>9}{'испар.':>9}")
-    thin = Vehicle.plate(1.0, 1.0e-3, Cd=CD)
-    tr_thin = integrate(thin, ENTRY, ATM)
-    for e in EPS_GRID:
-        m = Aluminium(emissivity=float(e))
+    tr_thin = integrate(THIN, ENTRY, ATM)
+    print(f"   {'eps':<16}{'T макс целого':>14}{'расплав':>9}{'испар.':>8}"
+          f"   ||{'T макс пластины':>16}{'расплав':>9}{'испар.':>8}")
+    mats = [(f"{e:.2f}", Aluminium(emissivity=float(e))) for e in EPS_GRID]
+    mats += [(name, m) for name, m in S.SCENARIOS.items()]
+    for label, m in mats:
         r = surface_thermal_model(tr, INTACT, m)
-        rt = surface_thermal_model(tr_thin, thin, m, wall_thickness=1.0e-3)
-        print(f"   {e:>6.2f}{r['T_nose']:>12.0f}{100*r['f_melt']:>9.0f}%"
-              f"{100*r['f_vap']:>10.1f}%      ||"
-              f"{rt['T_nose']:>26.0f}{100*rt['f_melt']:>8.0f}%"
-              f"{100*rt['f_vap']:>8.0f}%")
-    print(f"\n   Целый объект: eps почти не влияет — стенка 16 мм не успевает")
-    print(f"   выйти на радиационное равновесие, задача ЭНЕРГЕТИЧЕСКАЯ.")
-    print(f"   Тонкая пластина: выходит на равновесие быстро, и там eps решает всё.")
-    print(f"   Глубина прогрева за полёт {thermal_diffusion_depth(303.)*100:.0f} см — "
-          f"критерий применимости\n   сосредоточенной модели по толщине стенки.\n")
+        rt = surface_thermal_model(tr_thin, THIN, m, wall_thickness=1.0e-3)
+        key = SCEN_KEY[label] if label in SCEN_KEY else f"e{round(float(label)*100):03d}"
+        R[f"eps.{key}.whole_Tmax"] = r["T_max"]
+        R[f"eps.{key}.whole_melt_pct"] = 100 * r["f_melt"]
+        R[f"eps.{key}.whole_vap_pct"] = 100 * r["f_vap"]
+        R[f"eps.{key}.plate_Tmax"] = rt["T_max"]
+        R[f"eps.{key}.plate_melt_pct"] = 100 * rt["f_melt"]
+        R[f"eps.{key}.plate_vap_pct"] = 100 * rt["f_vap"]
+        print(f"   {label:<16}{r['T_max']:>14.0f}{100*r['f_melt']:>8.0f}%"
+              f"{100*r['f_vap']:>7.0f}%   ||{rt['T_max']:>16.0f}"
+              f"{100*rt['f_melt']:>8.0f}%{100*rt['f_vap']:>7.0f}%")
+    print("\n   Целый объект: eps почти не влияет — стенка 16 мм не успевает")
+    print("   выйти на радиационное равновесие, задача ЭНЕРГЕТИЧЕСКАЯ. Расплав")
+    print("   не больше 50%: подветренная половина оболочки в модели не греется.")
+    print("   Пластина: выходит на равновесие быстро, и там eps важна.\n")
 
 
-def run_fragments(mat: Aluminium):
-    """Целый объект до высоты разрушения, затем каждый фрагмент отдельно."""
-    tr0 = integrate(INTACT, ENTRY, ATM, h_stop=60.0e3)
-    out = []
-    for name, f_mass, h_break, kind, param in FRAGMENTS:
-        veh, t_wall = fragment_vehicle(f_mass, kind, param)
-        start = tr0.state_at_altitude(h_break, ENTRY.inclination_deg)
-        tr = integrate(veh, start, ATM)
-        out.append((name, veh, tr, h_break, veh.ballistic_coefficient, t_wall))
-    return tr0, out
-
-
-def report_fragments(mat: Aluminium):
-    print("C. СПИСОК ФРАГМЕНТОВ (не N равных осколков, а спектр beta)")
-    print("   SESAM по умолчанию: панели 95 км, корпус 78 км\n")
-    _, frags = run_fragments(mat)
-    print(f"   {'фрагмент':<24}{'m, кг':>8}{'beta':>7}{'Rn, см':>8}"
-          f"{'h разр.':>9}{'h пика q':>10}{'расплав':>10}{'испар.':>9}")
+def report_fragments(mat: Aluminium, frags):
+    print(f"C. СПИСОК ФРАГМЕНТОВ, сценарий: {mat.label()}")
+    print(f"   {'фрагмент':<24}{'m, кг':>7}{'beta':>6}{'Rn, см':>8}"
+          f"{'h разр.':>9}{'h пика q':>10}{'T_кип, K':>11}{'расплав':>9}{'испар.':>8}")
+    run = S.run_model(frags, mat)
+    sk = SCEN_KEY[mat.label()]
+    fk = {"солнечные панели": "panels", "силовой набор": "structure",
+          "мелкие элементы, MLI": "mli"}
     tot_melt = tot_vap = 0.0
-    for name, veh, tr, h_break, beta, t_wall in frags:
-        r = surface_thermal_model(tr, veh, mat, wall_thickness=t_wall)
+    for name, veh, tr, r, f_al in run["per"]:
         tot_melt += r["m_melt"]; tot_vap += r["m_vap"]
-        print(f"   {name:<24}{veh.mass:>8.1f}{beta:>7.0f}"
-              f"{100*veh.nose_radius:>8.1f}{h_break/1e3:>9.0f}"
+        k = f"fragments.{sk}.{fk[name]}"
+        R[f"{k}.mass"] = veh.mass
+        R[f"{k}.beta"] = veh.ballistic_coefficient
+        R[f"{k}.rn_cm"] = 100 * veh.nose_radius
+        R[f"{k}.h_break_km"] = tr.h[0] / 1e3
+        R[f"{k}.h_peak_q_km"] = tr.peak_heating()[0] / 1e3
+        R[f"{k}.q_peak_wcm2"] = float(tr.heat_flux(veh).max()) / 1e4
+        R[f"{k}.Tb_min"] = r["T_boil"].min()
+        R[f"{k}.Tb_max"] = r["T_boil"].max()
+        R[f"{k}.melt_pct"] = 100 * r["f_melt"]
+        R[f"{k}.vap_pct"] = 100 * r["f_vap"]
+        print(f"   {name:<24}{veh.mass:>7.1f}{veh.ballistic_coefficient:>6.0f}"
+              f"{100*veh.nose_radius:>8.1f}{tr.h[0]/1e3:>9.0f}"
               f"{tr.peak_heating()[0]/1e3:>10.1f}"
-              f"{100*r['f_melt']:>9.0f}%"
-              f"{100*r['f_vap']:>8.1f}%")
-    f_al = INTACT.al_mass_fraction
-    print(f"\n   ИТОГО по объекту {M0:.0f} кг при eps={mat.emissivity:.2f}:")
-    print(f"     расплавлено      {tot_melt:6.1f} кг ({100*tot_melt/M0:.0f}%)"
-          f"  -> алюминия {tot_melt*f_al:5.1f} кг   ВЕРХНЯЯ ГРАНИЦА")
-    print(f"     испарено на месте{tot_vap:6.1f} кг ({100*tot_vap/M0:.0f}%)"
-          f"  -> алюминия {tot_vap*f_al:5.1f} кг   НИЖНЯЯ ГРАНИЦА")
-    print(f"\n   Наблюдаемая демизабельность конструкции типа OneWeb/SpaceX — 95%")
-    print(f"   (Ferreira 2024). Верхняя граница её воспроизводит, значит модель")
-    print(f"   согласована с известными результатами по расплавленной массе.\n")
-    return frags
+              f"{r['T_boil'].min():>6.0f}-{r['T_boil'].max():<4.0f}"
+              f"{100*r['f_melt']:>8.0f}%{100*r['f_vap']:>7.0f}%")
+    R[f"fragments.{sk}.total.melt_kg"] = tot_melt
+    R[f"fragments.{sk}.total.melt_pct"] = 100 * tot_melt / M0
+    R[f"fragments.{sk}.total.melt_al"] = run["melt"]
+    R[f"fragments.{sk}.total.vap_kg"] = tot_vap
+    R[f"fragments.{sk}.total.vap_pct"] = 100 * tot_vap / M0
+    R[f"fragments.{sk}.total.vap_al"] = run["total"]
+    print(f"\n   ИТОГО по объекту {M0:.0f} кг:")
+    print(f"     расплавлено        {tot_melt:6.1f} кг ({100*tot_melt/M0:.0f}%)"
+          f"  -> Al {run['melt']:5.1f} кг   ВЕРХНЯЯ ГРАНИЦА")
+    print(f"     испарено на месте  {tot_vap:6.1f} кг ({100*tot_vap/M0:.0f}%)"
+          f"  -> Al {run['total']:5.1f} кг\n")
 
 
-def altitude_histogram(frags, mat: Aluminium, bins=np.arange(40, 102, 2.0)):
-    """Высотное распределение испарённой массы — задел шага 5."""
-    centers = 0.5 * (bins[:-1] + bins[1:])
-    hist = np.zeros_like(centers)
-    for _, veh, tr, _, _, t_wall in frags:
-        r = surface_thermal_model(tr, veh, mat, wall_thickness=t_wall)
-        dm = np.diff(r["m_vap_series"]) * veh.al_mass_fraction
-        h_km = r["h"][:-1] / 1e3
-        idx = np.digitize(h_km, bins) - 1
-        ok = (idx >= 0) & (idx < len(centers))
-        np.add.at(hist, idx[ok], dm[ok])
-    return centers, hist
+def report_oxide_growth(frags):
+    print("E. eps КАК ТРАЕКТОРИЯ: РОСТ ОКСИДНОЙ ПЛЁНКИ")
+    print("   eps(t,T) = eps_голый(T) + (eps_плёнка(T) - eps_голый(T))(1-exp(-sqrt(t/tau)))")
+    print("   t — время С МОМЕНТА РАЗРУШЕНИЯ: поверхность фрагмента новая. Нагрев")
+    print("   фрагментов идёт в первые ~10-40 с после разрушения.\n")
+    print(f"   {'tau, с':>9}{'eps(10 с)':>11}{'eps(30 с)':>11}{'Al исп., кг':>13}{'выход':>8}")
+    T = np.array([S.T_OPER])
+    for tau in (1.0, 10.0, 30.0, 100.0, 300.0, 1000.0, 10000.0):
+        mat = Aluminium(tau_oxide=tau)
+        s = S.summarize(S.run_model(frags, mat))
+        k = f"growth.tau{tau:.0f}"
+        R[f"{k}.eps10"] = float(mat.emissivity_at(T, 10.0)[0])
+        R[f"{k}.eps30"] = float(mat.emissivity_at(T, 30.0)[0])
+        R[f"{k}.total"] = s["total"]
+        R[f"{k}.yield_pct"] = 100 * s["total"] / S.M_AL_TOTAL
+        print(f"   {tau:>9.0f}{float(mat.emissivity_at(T, 10.0)[0]):>11.3f}"
+              f"{float(mat.emissivity_at(T, 30.0)[0]):>11.3f}{s['total']:>13.1f}"
+              f"{100*s['total']/S.M_AL_TOTAL:>7.0f}%")
+    print("\n   Гипотеза не сужает неопределённость: неизвестное переименовалось")
+    print("   из 'какое eps' в 'как быстро растёт плёнка', но весь размах теперь")
+    print("   укладывается между двумя сценариями. Лабораторный запрос: мерить eps")
+    print("   КАК ФУНКЦИЮ ТОЛЩИНЫ оксида.\n")
+
+
+def report_regime():
+    print("F. ЧТО РАЗДЕЛЯЕТ РЕЖИМЫ")
+    print("   Не глубина прогрева (и 1 мм, и 16 мм много тоньше 14 см), а масса")
+    print("   на единицу ОМЫВАЕМОЙ площади. У пластины омываются обе грани,")
+    print("   поэтому на единицу омываемой площади приходится rho*t/2.\n")
+    print(f"   {'объект':<18}{'эквив. толщина':>16}{'нужно':>12}"
+          f"{'доступно':>12}{'Pi':>8}{'режим':>16}")
+    for label, veh in (("целый объект", INTACT), ("пластина 1 мм", THIN)):
+        tr = integrate(veh, ENTRY, ATM)
+        r = regime_number(tr, veh, Aluminium())
+        k = "regime.whole" if veh is INTACT else "regime.plate"
+        R[f"{k}.equiv_mm"] = r["equiv_thickness"] * 1e3
+        R[f"{k}.need_MJ"] = r["need"] / 1e6
+        R[f"{k}.avail_MJ"] = r["available"] / 1e6
+        R[f"{k}.Pi"] = r["Pi"]
+        print(f"   {label:<18}{r['equiv_thickness']*1e3:>13.1f} мм"
+              f"{r['need']/1e6:>8.1f} МДж{r['available']/1e6:>8.1f} МДж"
+              f"{r['Pi']:>8.2f}{r['regime']:>16}")
+    print()
 
 
 def figure_epsilon(path="step4_epsilon.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
-    eps = np.array([0.05, 0.08, 0.12, 0.17, 0.22, 0.28, 0.35])
-
-    def band(ax):
-        ax.axvspan(0.04, 0.10, color="tab:blue", alpha=0.10)
-        ax.axvspan(0.30, 0.36, color="tab:green", alpha=0.12)
+    mat = Aluminium()
+    Tb = mat.T_boil_nominal
+    q_typ = 8.5e5
 
     ax = axes[0]
     theta = np.linspace(0, np.pi / 2, 200)
     ax.plot(np.degrees(theta), np.cos(theta), lw=2.0, color="k",
             label=r"$q(\theta)/q_{stag}=\cos\theta$")
-    for e, c in ((0.10, "tab:red"), (0.20, "tab:orange"), (0.30, "tab:green")):
-        C = e * SIGMA_SB * 2740.0 ** 4 / 8.5e5
+    for name, c in (("голый расплав", "tab:red"), ("плёнка активна", "tab:blue")):
+        e = S.eps_oper(S.SCENARIOS[name], Tb)
+        C = 2 * e * SIGMA_SB * Tb ** 4 / q_typ
         if C < 1:
             ax.fill_between(np.degrees(theta), C, np.cos(theta),
                             where=np.cos(theta) > C, alpha=0.18, color=c)
         ax.axhline(min(C, 1.05), color=c, ls="--", lw=1.1,
-                   label=fr"порог кипения, $\varepsilon$={e}")
-    ax.set_xlabel(r"угол от точки торможения, град"); ax.set_ylabel(r"$q/q_{stag}$")
-    ax.set_title("распределение, а не среднее\n" r"$\langle\cos\theta\rangle=0.25$ точно",
+                   label=f"порог кипения пластины, {name}")
+    ax.set_xlabel("угол от точки торможения, град"); ax.set_ylabel(r"$q/q_{stag}$")
+    ax.set_title(f"распределение, а не среднее\nq = 85 Вт/см², T_кип = {Tb:.0f} K",
                  fontsize=9.5)
-    ax.legend(frameon=False, fontsize=7.5); ax.set_ylim(0, 1.1)
+    ax.legend(frameon=False, fontsize=7.2); ax.set_ylim(0, 1.1)
 
-    # Тонкая пластина 1 мм — там eps решает всё
-    thin = Vehicle.plate(1.0, 1.0e-3, Cd=CD)
-    tr_thin = integrate(thin, ENTRY, ATM)
+    tr_thin = integrate(THIN, ENTRY, ATM)
     tr_int = integrate(INTACT, ENTRY, ATM)
-    mel_t, vap_t, mel_i, vap_i = [], [], [], []
-    for e in eps:
-        m = Aluminium(emissivity=float(e))
-        rt = surface_thermal_model(tr_thin, thin, m, wall_thickness=1.0e-3)
-        ri = surface_thermal_model(tr_int, INTACT, m)
-        mel_t.append(100 * rt["f_melt"]); vap_t.append(100 * rt["f_vap"])
-        mel_i.append(100 * ri["f_melt"]); vap_i.append(100 * ri["f_vap"])
+    eps = EPS_GRID
+    res_t = [surface_thermal_model(tr_thin, THIN, Aluminium(emissivity=float(e)),
+                                   wall_thickness=1.0e-3) for e in eps]
+    res_i = [surface_thermal_model(tr_int, INTACT, Aluminium(emissivity=float(e)))
+             for e in eps]
+    for ax, res, title in ((axes[1], res_t, "пластина 1 мм (от точки входа)"),
+                           (axes[2], res_i, "целый объект (стенка 16 мм)")):
+        mel = [100 * r["f_melt"] for r in res]
+        vap = [100 * r["f_vap"] for r in res]
+        ax.fill_between(eps, vap, mel, color="tab:purple", alpha=0.20)
+        ax.plot(eps, mel, lw=2.0, marker="o", ms=3.5, label="расплав")
+        ax.plot(eps, vap, lw=2.0, ls="--", marker="s", ms=3.5,
+                label="испарено на месте")
+        for name, c in (("голый расплав", "tab:red"), ("плёнка активна", "tab:blue")):
+            ax.axvline(S.eps_oper(S.SCENARIOS[name], Tb), color=c, lw=1.0, ls=":")
+        ax.set_xlabel(r"постоянная $\varepsilon$"); ax.set_ylabel("доля массы, %")
+        ax.set_title(title, fontsize=9.5)
+        ax.legend(frameon=False, fontsize=8); ax.set_ylim(-2, 102)
 
-    ax = axes[1]
-    ax.fill_between(eps, vap_t, mel_t, color="tab:purple", alpha=0.20,
-                    label="вилка")
-    ax.plot(eps, mel_t, lw=2.0, marker="o", ms=3.5, label="расплав (верхняя)")
-    ax.plot(eps, vap_t, lw=2.0, ls="--", marker="s", ms=3.5,
-            label="испарено на месте (нижняя)")
-    band(ax)
-    ax.set_xlabel(r"$\varepsilon$"); ax.set_ylabel("доля массы, %")
-    ax.set_title("тонкая пластина 1 мм:\nответ меняется в 50 раз", fontsize=9.5)
-    ax.legend(frameon=False, fontsize=8)
-
-    ax = axes[2]
-    ax.fill_between(eps, vap_i, mel_i, color="tab:purple", alpha=0.20)
-    ax.plot(eps, mel_i, lw=2.0, marker="o", ms=3.5, label="расплав")
-    ax.plot(eps, vap_i, lw=2.0, ls="--", marker="s", ms=3.5, label="испарено")
-    band(ax)
-    ax.set_xlabel(r"$\varepsilon$"); ax.set_ylabel("доля массы, %")
-    ax.set_title("целый объект (стенка 16 мм):\n" r"$\varepsilon$ не влияет, "
-                 "задача энергетическая", fontsize=9.5)
-    ax.legend(frameon=False, fontsize=8); ax.set_ylim(-2, 100)
-
-    fig.suptitle("Весь ответ упирается в излучательную способность окисленной "
-                 "поверхности при высокой температуре", fontsize=11)
+    fig.suptitle("Эмиссивность решает для тонкостенных элементов и не решает "
+                 "для массивных (пунктир — сценарии при T_кип)", fontsize=11)
     fig.tight_layout(); fig.savefig(path, bbox_inches="tight")
     print(f"   сохранено: {path}")
 
 
-def figure_bracket(path="step4_bracket.png"):
+def figure_bracket(frags, path="step4_bracket.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0), sharey=True)
-
-    for k, (eps_v, ax) in enumerate(zip((0.05, 0.10, 0.20), axes)):
-        mat = Aluminium(emissivity=eps_v)
-        _, frags = run_fragments(mat)
-        c, hist = altitude_histogram(frags, mat)
-        ax.barh(c, hist, height=1.8, color="tab:blue")
+    cases = [("голый расплав", S.SCENARIOS["голый расплав"]),
+             ("рост плёнки tau = 30 с", Aluminium(tau_oxide=30.0)),
+             ("плёнка активна", S.SCENARIOS["плёнка активна"])]
+    for ax, (label, mat) in zip(axes, cases):
+        run = S.run_model(frags, mat)
+        hist = S.histogram(run)
+        ax.barh(S.CENTERS, hist, height=1.8, color="tab:blue")
         ax.axhspan(70, 80, color="seagreen", alpha=0.15)
         ax.set_xlabel("испарённый Al в слое, кг")
         ax.set_ylabel("высота, км")
-        ax.set_title(fr"$\varepsilon$={eps_v}: всего "
-                     f"{hist.sum():.1f} кг Al", fontsize=9.5)
-        if hist.sum() < 1e-9:
-            ax.text(0.5, 70, "испарения нет\nвсё остаётся расплавом",
-                    transform=ax.get_yaxis_transform(), fontsize=9,
-                    ha="center", color="crimson")
-
+        ax.set_title(f"{label}: всего {run['total']:.1f} кг Al", fontsize=9.5)
+        ax.set_ylim(40, 100)
     fig.suptitle("Высотное распределение испарённого алюминия: "
-                 "два значения одной неизмеренной константы", fontsize=11)
+                 "форма от сценария поверхности почти не зависит", fontsize=11)
     fig.tight_layout(); fig.savefig(path, bbox_inches="tight")
     print(f"   сохранено: {path}")
-
-
-MW_AL_IN_OXIDE = 2 * 26.98 / (2 * 26.98 + 3 * 16.00)   # 0.5292
-
-
-def report_ferreira():
-    """Сверка с Ferreira независимым путём."""
-    print("D. СВЕРКА С FERREIRA")
-    print(f"   Ferreira: 250 кг, 30% Al = 75.0 кг Al -> ~30 кг Al2O3")
-    print(f"   Al в них: 30 * {MW_AL_IN_OXIDE:.4f} = {30*MW_AL_IN_OXIDE:.1f} кг"
-          f"  ->  выход {100*30*MW_AL_IN_OXIDE/75:.0f}%")
-    print(f"   в нормировке на массу спутника: {30/250:.3f} кг Al2O3 на кг\n")
-    print(f"   {'eps':>6}{'Al исп., кг':>13}{'выход':>8}{'Al2O3, кг':>12}"
-          f"{'Al2O3/кг спутника':>20}")
-    f_al = INTACT.al_mass_fraction
-    for e in (0.05, 0.10, 0.15, 0.20, 0.30):
-        mat = Aluminium(emissivity=float(e))
-        _, frags = run_fragments(mat)
-        tot = sum(surface_thermal_model(tr, veh, mat, wall_thickness=tw)["m_vap"]
-                  for _, veh, tr, _, _, tw in frags)
-        al = tot * f_al
-        print(f"   {e:>6.2f}{al:>13.1f}{100*al/(M0*f_al):>7.0f}%"
-              f"{al/MW_AL_IN_OXIDE:>12.1f}{al/MW_AL_IN_OXIDE/M0:>20.3f}")
-    print("\n   Диапазон 14-29% НАКРЫВАЕТ значение Ferreira (21%), полученное")
-    print("   совершенно другим путём — молекулярной динамикой окисления.")
-    print("   Оговорка: другая масса, другие условия входа, у него число")
-    print("   обобщённое. Это согласие по порядку величины, не валидация.\n")
-
-
-def report_oxide_growth():
-    print("E. eps КАК ТРАЕКТОРИЯ: РОСТ ОКСИДНОЙ ПЛЁНКИ")
-    print("   Тонкая плёнка оптически прозрачна -> излучает металл под ней.")
-    print("   delta ~ sqrt(t), eps = eps_мет + (eps_окс-eps_мет)(1-exp(-sqrt(t/tau)))\n")
-    print(f"   {'tau, с':>9}{'eps на пике':>14}{'Al исп., кг':>13}{'выход':>8}")
-    f_al = INTACT.al_mass_fraction
-    for tau in (1.0, 30.0, 100.0, 300.0, 1000.0, 10000.0):
-        mat = Aluminium(tau_oxide=tau)
-        _, frags = run_fragments(mat)
-        tot = sum(surface_thermal_model(tr, veh, mat, wall_thickness=tw)["m_vap"]
-                  for _, veh, tr, _, _, tw in frags)
-        al = tot * f_al
-        print(f"   {tau:>9.0f}{float(mat.eps_at(200.0)):>14.3f}{al:>13.1f}"
-              f"{100*al/(M0*f_al):>7.0f}%")
-    print("\n   Гипотеза физически верна, но неопределённость НЕ СУЖАЕТ:")
-    print("   6-27% против 6-29% у постоянной eps. Неизвестное переименовалось")
-    print("   из 'какое eps' в 'как быстро растёт плёнка'.")
-    print("   Лабораторный запрос уточняется: мерить eps КАК ФУНКЦИЮ ТОЛЩИНЫ")
-    print("   оксида — эллипсометр плюс UV-Vis/FTIR на образцах с контролируемой")
-    print("   степенью окисления.\n")
-
-
-def report_regime():
-    print("F. ЧТО РАЗДЕЛЯЕТ РЕЖИМЫ (поправка)")
-    print("   Не глубина прогрева: и 1 мм, и 16 мм много тоньше 14 см, значит")
-    print("   сосредоточенная модель законна для обеих. Разделяет ПОВЕРХНОСТНАЯ")
-    print("   ТЕПЛОЁМКОСТЬ rho*c_p*delta.\n")
-    print(f"   {'объект':<18}{'delta':>9}{'rho cp d':>13}{'нужно':>13}"
-          f"{'доступно':>12}{'Pi':>8}{'режим':>16}")
-    thin = Vehicle.plate(1.0, 1.0e-3, Cd=CD)
-    for label, veh, tw in (("целый объект", INTACT, None),
-                           ("пластина 1 мм", thin, 1.0e-3)):
-        tr = integrate(veh, ENTRY, ATM)
-        r = regime_number(tr, veh, Aluminium(), wall_thickness=tw)
-        print(f"   {label:<18}{r['thickness']*1e3:>7.1f} мм"
-              f"{r['areal_C']/1e3:>11.1f} кДж{r['need']/1e6:>9.0f} МДж"
-              f"{r['available']/1e6:>8.0f} МДж{r['Pi']:>8.2f}{r['regime']:>16}")
-    print()
 
 
 if __name__ == "__main__":
     print()
-    mat = Aluminium()
-    report_criteria(mat)
-    report_epsilon(mat)
-    report_fragments(Aluminium(emissivity=0.10))
-    report_ferreira()
-    report_oxide_growth()
+    report_criteria()
+    report_epsilon()
+    frags = S.build_fragments()
+    for mat in S.SCENARIOS.values():
+        report_fragments(mat, frags)
+    report_oxide_growth(frags)
     report_regime()
     figure_epsilon()
-    figure_bracket()
+    figure_bracket(frags)
     print()
+    R.save(__file__)
