@@ -9,7 +9,7 @@
 checks.total — число проверок test_* во всех verify_step*.py,
 checks.verify_stepN — в одном файле.
 
-    python check_docs.py              README.md и ../REPORT_full.md (если есть)
+    python check_docs.py              README.md и docs/REPORT.md
     python check_docs.py --fix        переписать числа из результатов
     python check_docs.py FILE ...     конкретные файлы
 
@@ -31,11 +31,7 @@ MARK = re.compile(r"(?P<num>[+\-−]?\d+(?:\.\d+)?)"
 
 
 def default_docs() -> list[Path]:
-    docs = [ROOT / "README.md"]
-    report = ROOT.parent / "REPORT_full.md"
-    if report.exists():
-        docs.append(report)
-    return docs
+    return [ROOT / "README.md", ROOT / "docs" / "REPORT.md"]
 
 
 def _count_checks() -> dict:

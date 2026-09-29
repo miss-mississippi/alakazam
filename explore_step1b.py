@@ -172,7 +172,7 @@ def part_c_fragmentation():
     return ratios, heights
 
 
-def figure(ratios, heights, path="step1b_fragmentation.png"):
+def figure(ratios, heights, path="figures/step1b_fragmentation.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
 
     # 1: форма нагрева vs торможения для целого объекта

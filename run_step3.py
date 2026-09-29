@@ -148,7 +148,7 @@ def report_budget():
     return rows
 
 
-def figure_heating(tr, path="step3_heating.png"):
+def figure_heating(tr, path="figures/step3_heating.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
     q = tr.heat_flux(VEH) / 1e4
     q_dkr = tr.heat_flux(VEH, "dkr") / 1e4
@@ -190,7 +190,7 @@ def figure_heating(tr, path="step3_heating.png"):
     print(f"   сохранено: {path}")
 
 
-def figure_budget(rows, path="step3_budget.png"):
+def figure_budget(rows, path="figures/step3_budget.png"):
     rows_h = [(l, dh) for l, k, dh, _ in rows if k != "масса" and dh > 0.02]
     rows_h.sort(key=lambda r: r[1])
     rows_q = sorted([(l, dq) for l, _, _, dq in rows if dq > 0.5], key=lambda r: r[1])

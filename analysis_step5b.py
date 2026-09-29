@@ -298,7 +298,7 @@ def part_f_instruments(lam_c):
     return true
 
 
-def figure(hb, med, fit, lam_c, path="step5b_revision.png"):
+def figure(hb, med, fit, lam_c, path="figures/step5b_revision.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.1))
 
     ax = axes[0]

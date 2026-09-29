@@ -387,7 +387,7 @@ def report_experiment():
     print("   сферой: нужна полная (зеркальная + диффузная) R.\n")
 
 
-def figure_main(runs, sweep, path="step5_main.png"):
+def figure_main(runs, sweep, path="figures/step5_main.png"):
     fig = plt.figure(figsize=(13, 5.0))
     gs = fig.add_gridspec(1, 3, width_ratios=[1.25, 1, 1], wspace=0.32)
 
@@ -454,7 +454,7 @@ def figure_main(runs, sweep, path="step5_main.png"):
     print(f"   сохранено: {path}")
 
 
-def figure_sensitivity(rows, base, path="step5_sensitivity.png"):
+def figure_sensitivity(rows, base, path="figures/step5_sensitivity.png"):
     rows = sorted(rows, key=lambda r: (r[2] - r[1]))
     fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.4))
     labels = [r[0] for r in rows]
@@ -476,7 +476,7 @@ def figure_sensitivity(rows, base, path="step5_sensitivity.png"):
     print(f"   сохранено: {path}")
 
 
-def figure_experiment(path="step5_experiment.png"):
+def figure_experiment(path="figures/step5_experiment.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
     lam = np.geomspace(0.2e-6, 30e-6, 1200)
 

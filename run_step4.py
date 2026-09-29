@@ -187,7 +187,7 @@ def report_regime():
     print()
 
 
-def figure_epsilon(path="step4_epsilon.png"):
+def figure_epsilon(path="figures/step4_epsilon.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
     mat = Aluminium()
     Tb = mat.T_boil_nominal
@@ -237,7 +237,7 @@ def figure_epsilon(path="step4_epsilon.png"):
     print(f"   сохранено: {path}")
 
 
-def figure_bracket(frags, path="step4_bracket.png"):
+def figure_bracket(frags, path="figures/step4_bracket.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0), sharey=True)
     cases = [("голый расплав", S.SCENARIOS["голый расплав"]),
              ("рост плёнки tau = 30 с", Aluminium(tau_oxide=30.0)),

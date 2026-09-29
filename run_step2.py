@@ -144,7 +144,7 @@ def table_geography():
     print()
 
 
-def figure_atmosphere(exp, m00, m21, path="step2_atmosphere.png"):
+def figure_atmosphere(exp, m00, m21, path="figures/step2_atmosphere.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
     hh = np.linspace(20e3, 140e3, 600)
 
@@ -179,7 +179,7 @@ def figure_atmosphere(exp, m00, m21, path="step2_atmosphere.png"):
     print(f"   сохранено: {path}")
 
 
-def figure_trajectory(trs, path="step2_trajectory.png"):
+def figure_trajectory(trs, path="figures/step2_trajectory.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
     styles = {"экспонента": dict(ls="--", color="tab:red"),
               "MSISE-00": dict(ls="-", color="tab:blue"),

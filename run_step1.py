@@ -83,7 +83,7 @@ def print_report(traj, ae, vehicle, entry, atmosphere):
     print()
 
 
-def figure_main(traj, ae, atmosphere, entry, path="step1_trajectory.png"):
+def figure_main(traj, ae, atmosphere, entry, path="figures/step1_trajectory.png"):
     fig, axes = plt.subplots(2, 3, figsize=(13, 7))
     t = traj.t
     h_km = traj.h / 1e3
@@ -140,7 +140,7 @@ def figure_main(traj, ae, atmosphere, entry, path="step1_trajectory.png"):
     print(f"  сохранено: {path}")
 
 
-def figure_gamma_sweep(vehicle, atmosphere, path="step1_gamma_sweep.png"):
+def figure_gamma_sweep(vehicle, atmosphere, path="figures/step1_gamma_sweep.png"):
     """Чувствительность к углу входа — диапазон -1...-3 град это разные режимы."""
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.8))
     print("  чувствительность к углу входа:")
