@@ -1,10 +1,9 @@
-"""Траектория входа: планарные уравнения движения и интегрирование.
+"""Entry trajectory: planar equations of motion and integration.
 
-Система координат: полярная, инерциальная, состояние [V, gamma, h, s].
-Земля сферическая. Вращение атмосферы входит только через скорость
-относительно воздуха в сопротивлении и нагреве (earth_rotation). Подъёмной
-и боковой силы нет, поэтому движение СТРОГО планарное — это не приближение,
-а следствие допущений.
+Coordinates: polar, inertial, state [V, gamma, h, s]. Spherical Earth.
+Atmospheric rotation enters only through the air-relative speed in drag and
+heating (earth_rotation). There is no lift or side force, so the motion is
+STRICTLY planar: a consequence of the assumptions, not an approximation.
 """
 
 from __future__ import annotations
@@ -17,22 +16,21 @@ from scipy.integrate import solve_ivp
 from .constants import H_SCALE_FIT, MU_EARTH, R_EARTH, RHO0_SEA_LEVEL
 from .vehicle import EntryState, Vehicle
 
-# Индексы вектора состояния
+# State vector indices
 I_V, I_GAMMA, I_H, I_S = 0, 1, 2, 3
 
 
 def eom(t, y, vehicle: Vehicle, atmosphere, v_corot: float = 0.0):
-    """Правая часть системы.
+    """Right-hand side.
 
         dV/dt     = -(1/2) rho V^2 Cd A / m  -  (mu/r^2) sin(gamma)
         dgamma/dt = cos(gamma) * ( V/r  -  mu/(r^2 V) )
         dh/dt     = V sin(gamma)
         ds/dt     = V cos(gamma) * R_E/r
 
-    Второе уравнение — ядро задачи. V/r — центробежный член,
-    mu/(r^2 V) — гравитационный. При околоорбитальной скорости они почти
-    сокращаются, поэтому gamma эволюционирует медленно, и траектория
-    чувствительна к gamma0.
+    The second equation is the core of the problem. V/r is the centrifugal
+    term, mu/(r^2 V) the gravity term. At near-orbital speed they almost
+    cancel, so gamma evolves slowly and the trajectory is sensitive to gamma0.
     """
     V, gamma, h, s = y
 
@@ -40,10 +38,10 @@ def eom(t, y, vehicle: Vehicle, atmosphere, v_corot: float = 0.0):
     g = MU_EARTH / (r * r)
     rho = atmosphere.density(h)
 
-    # Сопротивление и нагрев зависят от скорости ОТНОСИТЕЛЬНО АТМОСФЕРЫ,
-    # а она вращается вместе с Землёй. v_corot = omega*R*cos(i), см.
-    # EntryState.corotation_speed. При i=53 это 280 м/с, то есть 3.7% в V
-    # и ~11% в тепловом потоке, потому что q ~ V^3.
+    # Drag and heating depend on the speed RELATIVE TO THE ATMOSPHERE, which
+    # rotates with the Earth. v_corot = omega*R*cos(i), see
+    # EntryState.corotation_speed. At i = 53 it is 280 m/s: 3.7% in V and
+    # ~11% in heat flux, since q ~ V^3.
     V_rel = V - v_corot
 
     drag_decel = 0.5 * rho * V_rel * V_rel * vehicle.Cd * vehicle.area / vehicle.mass
@@ -78,52 +76,51 @@ class TrajectoryResult:
     h: np.ndarray
     s: np.ndarray
     rho: np.ndarray
-    decel: np.ndarray          # полное аэродинамическое замедление, м/с^2
+    decel: np.ndarray          # total aerodynamic deceleration, m/s^2
     stop_reason: str
-    raw: object                # объект solve_ivp, если нужен dense_output
-    V_rel: np.ndarray = None   # скорость относительно вращающейся атмосферы
+    raw: object                # solve_ivp object, if dense_output is needed
+    V_rel: np.ndarray = None   # speed relative to the rotating atmosphere
 
     @property
     def gamma_deg(self):
         return np.rad2deg(self.gamma)
 
     def peak_decel(self):
-        """(a_max [м/с^2], h [м], V [м/с]) в точке максимального торможения."""
+        """(a_max [m/s^2], h [m], V [m/s]) at maximum deceleration."""
         i = int(np.argmax(self.decel))
         return self.decel[i], self.h[i], self.V[i]
 
     @property
     def heat_flux_shape(self):
-        """sqrt(rho)*V^3 — ФОРМА теплового потока Саттона-Грейвса без констант.
+        """sqrt(rho)*V^3: the SHAPE of the Sutton-Graves heat flux, no constants.
 
-        q = k*sqrt(rho/Rn)*V^3, и k, Rn — константы вдоль траектории.
-        Значит ВЫСОТА пика нагрева не зависит ни от k, ни от радиуса
-        затупления, ни от размерности: её можно найти без нагревной
-        корреляции.
+        q = k*sqrt(rho/Rn)*V^3, and k, Rn are constant along the trajectory.
+        So the peak-heating ALTITUDE depends neither on k, nor on the nose
+        radius, nor on units: it can be found without a heating correlation.
         """
         V = self.V_rel if self.V_rel is not None else self.V
         return np.sqrt(self.rho) * V ** 3
 
     def heat_flux(self, vehicle, correlation="sutton-graves") -> np.ndarray:
-        """Тепловой поток в точке торможения вдоль траектории, Вт/м^2."""
+        """Stagnation-point heat flux along the trajectory, W/m^2."""
         from .heating import detra_kemp_riddell_shape, sutton_graves
         V = self.V_rel if self.V_rel is not None else self.V
         f = sutton_graves if correlation == "sutton-graves" else detra_kemp_riddell_shape
         return f(self.rho, V, vehicle.nose_radius)
 
     def heat_load(self, vehicle, correlation="sutton-graves") -> float:
-        """Интегральный поток в точке торможения, Дж/м^2.
+        """Integrated stagnation-point heat load, J/m^2.
 
-        ВНИМАНИЕ: это НЕ прокси абляционной массы. Масса определяется полной
-        поглощённой энергией absorbed_energy(), а она зависит от площади,
-        которая связана с Rn. По q_stag знак зависимости от Rn обратный
-        правильному. Величина оставлена как диагностическая.
+        NOTE: this is NOT a proxy for ablated mass. Mass is set by the total
+        absorbed energy absorbed_energy(), which depends on the area, and the
+        area scales with Rn. In q_stag the sign of the Rn dependence is the
+        opposite of the correct one. Kept as a diagnostic.
         """
         return float(np.trapezoid(self.heat_flux(vehicle, correlation), self.t))
 
     def absorbed_power(self, vehicle, correlation="sutton-graves",
                        T_wall=None) -> np.ndarray:
-        """Полная поглощаемая мощность вдоль траектории, Вт."""
+        """Total absorbed power along the trajectory, W."""
         from .heating import absorbed_power, hot_wall_factor
         q = self.heat_flux(vehicle, correlation)
         if T_wall is not None:
@@ -133,29 +130,29 @@ class TrajectoryResult:
 
     def absorbed_energy(self, vehicle, correlation="sutton-graves",
                         T_wall=None) -> float:
-        """Полная поглощённая энергия за вход, Дж. ЭТО прокси массы уноса."""
+        """Total energy absorbed during entry, J. THIS is the ablated-mass proxy."""
         return float(np.trapezoid(
             self.absorbed_power(vehicle, correlation, T_wall), self.t))
 
     def specific_energy(self, vehicle, correlation="sutton-graves",
                         T_wall=None) -> float:
-        """Поглощённая энергия на килограмм, Дж/кг.
+        """Absorbed energy per kilogram, J/kg.
 
-        Величина, которую надо сравнивать с эффективной энтальпией абляции:
-        именно она решает, испарится материал или только прогреется.
+        The quantity to compare with the effective enthalpy of ablation: it
+        decides whether the material vaporizes or only heats up.
         """
         return self.absorbed_energy(vehicle, correlation, T_wall) / vehicle.mass
 
     def peak_heating(self):
-        """(h [м], V [м/с], t [с]) в точке максимума sqrt(rho)*V^3."""
+        """(h [m], V [m/s], t [s]) at the maximum of sqrt(rho)*V^3."""
         i = int(np.argmax(self.heat_flux_shape))
         return self.h[i], self.V[i], self.t[i]
 
     def state_at_altitude(self, h_target: float, inclination_deg: float = 53.0):
-        """EntryState на заданной высоте — точка рестарта после фрагментации.
+        """EntryState at a given altitude: the restart point after breakup.
 
-        Наклонение надо передавать явно: оно не восстанавливается из
-        состояния [V, gamma, h, s], а от него зависит соатмосферный снос.
+        Inclination must be passed explicitly: it cannot be recovered from
+        the state [V, gamma, h, s], and the co-rotation drift depends on it.
         """
         i = int(np.argmin(np.abs(self.h - h_target)))
         return EntryState(altitude=float(self.h[i]),
@@ -175,17 +172,17 @@ def integrate(
     max_step: float = 2.0,
     rtol: float = 1e-8,
 ) -> TrajectoryResult:
-    """Интегрирует вход от начальных условий до h_stop или v_stop.
+    """Integrate the entry from the initial conditions to h_stop or v_stop.
 
-    max_step=2 с — страховка, а не точность. На первых ~100 секундах
-    торможение пренебрежимо, интегратор разгоняет шаг до сотен секунд и
-    рискует перепрыгнуть включение сопротивления около 100 км.
+    max_step = 2 s is a safeguard, not accuracy. During the first ~100 s
+    drag is negligible, the integrator grows its step to hundreds of seconds
+    and risks jumping over the onset of drag near 100 km.
 
-    v_stop=300 м/с: ниже Mach ~1 вся гиперзвуковая физика (и корреляция
-    Саттона-Грейвса) неприменима.
+    v_stop = 300 m/s: below Mach ~1 the hypersonic physics (including the
+    Sutton-Graves correlation) no longer applies.
 
-    atol задан покомпонентно: скорость в м/с, угол в рад, высоты в м —
-    один скаляр на разномасштабные величины давать нельзя.
+    atol is per component: speed in m/s, angle in rad, distances in m. A
+    single scalar for quantities of different scales would be wrong.
     """
     y0 = entry.to_vector()
     atol = np.array([1e-3, 1e-9, 1e-3, 1e-3])
@@ -204,9 +201,9 @@ def integrate(
         dense_output=True,
     )
 
-    # Пересэмплируем на равномерную мелкую сетку через dense_output.
-    # Без этого argmax по узлам солвера зависит от max_step: при max_step=5
-    # высота пика торможения гуляет на ~1 км чисто от разрешения сетки.
+    # Resample onto a uniform fine grid via dense_output. Without this the
+    # argmax over solver nodes depends on max_step: at max_step = 5 the peak
+    # deceleration altitude moves by ~1 km purely from grid resolution.
     t = np.arange(0.0, sol.t[-1], 0.1)
     if t.size == 0 or t[-1] < sol.t[-1]:
         t = np.append(t, sol.t[-1])
@@ -217,38 +214,40 @@ def integrate(
     decel = 0.5 * rho * V_rel ** 2 * vehicle.Cd * vehicle.area / vehicle.mass
 
     if sol.t_events[0].size:
-        reason = f"достигнута высота {h_stop/1e3:.0f} км"
+        reason = f"reached altitude {h_stop/1e3:.0f} km"
     elif sol.t_events[1].size:
-        reason = f"скорость упала до {v_stop:.0f} м/с"
+        reason = f"speed dropped to {v_stop:.0f} m/s"
     else:
-        reason = f"истёк лимит времени {t_max:.0f} с"
+        reason = f"time limit {t_max:.0f} s reached"
 
     return TrajectoryResult(t, V, gamma, h, s, rho, decel, reason, sol, V_rel)
 
 
 # ---------------------------------------------------------------------------
-# Аналитика Аллена-Эггерса — только для сверки, в расчёте не участвует.
+# Allen-Eggers analytics: for cross-checking only, not used in the model.
 # ---------------------------------------------------------------------------
 
 def allen_eggers(vehicle: Vehicle, entry: EntryState,
                  rho0: float = RHO0_SEA_LEVEL, H: float = H_SCALE_FIT) -> dict:
-    """Классическое замкнутое решение (Allen & Eggers, NACA TR-1381, 1958).
+    """Classic closed-form solution (Allen & Eggers, NACA TR-1381, 1958).
 
-    Допущения: gamma = const, сопротивление >> гравитации, экспоненциальная
-    атмосфера, постоянный баллистический коэффициент.
+    Assumptions: gamma = const, drag >> gravity, exponential atmosphere,
+    constant ballistic coefficient.
 
-    rho0 и H передаются ЯВНО, а не берутся из объекта атмосферы. Причина:
-    А-Э определён только для экспоненциальной атмосферы, и обёртка над
-    NRLMSISE-00 никакого rho0 иметь не будет. Сверка сознательно привязана
-    к заглушке — на реальной атмосфере формула всё равно неприменима.
+    rho0 and H are passed EXPLICITLY rather than taken from the atmosphere
+    object: A-E is defined only for an exponential atmosphere, and the
+    NRLMSISE-00 wrapper has no rho0 of its own. The check is deliberately
+    tied to the placeholder; on a real atmosphere the formula does not apply.
 
-    У нас нарушены ПЕРВЫЕ ДВА: gamma успевает измениться вдвое, а первые
-    100 с полёт вообще бездрагвый. Поэтому ожидание — совпадение в пределах
-    20-30%, а не 1%. Расхождение в 2 раза и больше означает баг в коде.
+    Our case violates the FIRST TWO assumptions: gamma changes several-fold,
+    and the first 100 s of flight are essentially drag-free. So the peak
+    altitude with gamma0 is expected to be off, and it should agree once the
+    actual gamma at the peak is substituted. A discrepancy that survives that
+    substitution would indicate a bug.
 
-    Три цели:
-      V*    = V0/sqrt(e) = 0.6065*V0   — не зависит НИ ОТ ЧЕГО
-      a_max = V0^2 sin|gamma| / (2 e H) — не зависит от beta
+    Three targets:
+      V*    = V0/sqrt(e) = 0.6065*V0   - independent of EVERYTHING
+      a_max = V0^2 sin|gamma| / (2 e H) - independent of beta
       rho*  = beta sin|gamma| / H      -> h* = -H ln(rho*/rho0)
     """
     V0 = entry.velocity

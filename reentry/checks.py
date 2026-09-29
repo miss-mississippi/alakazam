@@ -1,9 +1,9 @@
-"""Запуск проверок verify_step*.py без pytest.
+"""Running the verify_step*.py checks without pytest.
 
-Проверки — обычные функции test_*, которые падают через assert. Под pytest
-они собираются как есть (см. pytest.ini). Этот модуль даёт тот же прогон
-командой `python verify_stepN.py`: вызывает все test_* в порядке объявления,
-печатает их вывод, считает провалы и возвращает код выхода.
+Checks are plain test_* functions that fail through assert. pytest collects
+them as they are (see pytest.ini). This module gives the same run via
+`python verify_stepN.py`: it calls every test_* in declaration order, prints
+their output, counts failures and returns an exit code.
 """
 
 from __future__ import annotations
@@ -21,10 +21,10 @@ def run_checks(namespace: dict, recorder=None, script: str | None = None) -> int
             fn()
         except AssertionError as exc:
             failed.append(name)
-            print(f"   -> ПРОВАЛ в {name}: {exc}\n")
+            print(f"   -> FAILED in {name}: {exc}\n")
         except Exception:
             failed.append(name)
-            print(f"   -> ОШИБКА в {name}:")
+            print(f"   -> ERROR in {name}:")
             traceback.print_exc()
             print()
     if recorder is not None:
@@ -32,7 +32,7 @@ def run_checks(namespace: dict, recorder=None, script: str | None = None) -> int
         recorder["total"] = len(tests)
         recorder.save(script)
     if failed:
-        print(f"ИТОГ: провалов {len(failed)} из {len(tests)}: {', '.join(failed)}\n")
+        print(f"RESULT: {len(failed)} of {len(tests)} checks failed: {', '.join(failed)}\n")
         return 1
-    print(f"ИТОГ: пройдены все проверки ({len(tests)} из {len(tests)})\n")
+    print(f"RESULT: all checks passed ({len(tests)} of {len(tests)})\n")
     return 0

@@ -1,10 +1,10 @@
-"""Модели атмосферы.
+"""Atmosphere models.
 
-Шаг 1: экспоненциальная заглушка (ExponentialAtmosphere).
-Шаг 2: NRLMSISE-00 / NRLMSIS 2.x через pymsis (MSISAtmosphere).
+Step 1: exponential placeholder (ExponentialAtmosphere).
+Step 2: NRLMSISE-00 / NRLMSIS 2.x via pymsis (MSISAtmosphere).
 
-Обе модели дают одинаковый интерфейс: .density(h) и .scale_height(h),
-поэтому траекторный код их не различает.
+Both expose the same interface, .density(h) and .scale_height(h), so the
+trajectory code does not distinguish between them.
 """
 
 from __future__ import annotations
@@ -21,20 +21,20 @@ from .constants import H_SCALE_FIT, RHO0_SEA_LEVEL
 class ExponentialAtmosphere:
     """rho(h) = rho0 * exp(-h/H).
 
-    Заглушка. Никаких свойств кроме плотности не даёт — на шаге 1 больше
-    ничего и не нужно (Саттон-Грейвс тоже требует только rho).
+    Placeholder. Provides nothing but density, which is all step 1 needs
+    (Sutton-Graves also needs only rho).
 
-    Ожидаемая точность против U.S. Standard Atmosphere 1976 при
-    rho0=1.225, H=7.2 км:
+    Expected accuracy against U.S. Standard Atmosphere 1976 with
+    rho0 = 1.225, H = 7.2 km:
 
-        120 км : завышает в ~3.2 раза
-        100 км : завышает в ~2 раза
-         80 км : ~1.0
-         60 км : ~1.0
-         40 км : завышает в ~1.2 раза
+        120 km : ~3.2x too high
+        100 km : ~2x too high
+         80 km : ~1.0
+         60 km : ~1.0
+         40 km : ~1.2x too high
 
-    То есть модель точна ровно там, где идёт абляция, и врёт там, где
-    торможение пренебрежимо. Но подгонять под неё ничего нельзя.
+    The model is accurate exactly where ablation happens and wrong where
+    deceleration is negligible. Nothing should be tuned against it.
     """
 
     name = "exponential (placeholder)"
@@ -44,62 +44,62 @@ class ExponentialAtmosphere:
         self.H = H
 
     def density(self, h):
-        """Плотность, кг/м^3. h — геометрическая высота, м."""
-        # Клампим снизу: без этого exp(-h/H) при h < 0 уходит в overflow,
-        # если интегратор пробует шаг ниже поверхности.
+        """Density, kg/m^3. h is geometric altitude, m."""
+        # Clamp from below: otherwise exp(-h/H) overflows if the integrator
+        # tries a step below the surface.
         h_clipped = np.maximum(h, 0.0)
         return self.rho0 * np.exp(-h_clipped / self.H)
 
     def scale_height(self, h):
-        """Локальная шкала высот, м. Для экспоненты — константа по определению."""
+        """Local scale height, m. Constant by definition for the exponential."""
         return self.H
 
 
 class MSISAtmosphere:
-    """NRLMSISE-00 / NRLMSIS 2.x через pymsis, затабулированная и сплайненная.
+    """NRLMSISE-00 / NRLMSIS 2.x via pymsis, tabulated and splined.
 
-    ПОЧЕМУ НЕ ЗОВЁМ pymsis НАПРЯМУЮ ИЗ ПРАВОЙ ЧАСТИ ОДУ.
-    solve_ivp вызывает density() десятки тысяч раз за прогон. Прямой вызов
-    MSIS на каждом шаге — это секунды на траекторию и часы на свип.
-    Табулируем один раз на сетке по высоте и интерполируем.
+    WHY pymsis IS NOT CALLED FROM THE ODE RIGHT-HAND SIDE.
+    solve_ivp calls density() tens of thousands of times per run. A direct
+    MSIS call at every step costs seconds per trajectory and hours per sweep.
+    We tabulate once on an altitude grid and interpolate.
 
-    ПОЧЕМУ СПЛАЙН ПО log(rho), А НЕ ПО rho.
-    Плотность меняется на 6 порядков на нашем диапазоне; линейная
-    интерполяция по rho в разреженной части даёт чудовищную ошибку.
-    log(rho) почти линеен по высоте (это и есть смысл шкалы высот),
-    поэтому интерполируется отлично.
+    WHY THE SPLINE IS IN log(rho), NOT rho.
+    Density spans 6 orders of magnitude over our range; linear interpolation
+    in rho is badly wrong in the rarefied part. log(rho) is nearly linear in
+    altitude (that is what a scale height means), so it interpolates well.
 
-    ПОЧЕМУ КУБИЧЕСКИЙ, А НЕ ЛИНЕЙНЫЙ.
-    Линейная интерполяция по log(rho) даёт кусочно-экспоненциальную
-    плотность: непрерывную, но с изломами производной. Адаптивный
-    интегратор на каждом изломе режет шаг. CubicSpline даёт C2 и
-    правая часть ОДУ остаётся гладкой.
+    WHY CUBIC, NOT LINEAR.
+    Linear interpolation in log(rho) gives a piecewise-exponential density:
+    continuous, but with kinks in the derivative. An adaptive integrator cuts
+    its step at every kink. CubicSpline is C2, so the ODE right-hand side
+    stays smooth.
 
-    Параметры среды — физические, а не косметические:
-      f107, f107a : поток на 10.7 см, индекс солнечной активности.
-                    ~70 в минимуме цикла, ~140 умеренно, ~220 в максимуме.
-                    Влияет в основном на термосферу (выше 100 км), где
-                    торможение всё равно пренебрежимо. Проверяется свипом.
-      ap          : геомагнитный индекс. 4 — спокойно, 50+ — буря.
-      lat, lon    : контролируемые сходы обычно целят в южную часть Тихого
-                    океана (SPOUA), примерно -40 град широты.
-      version     : 2.1 = NRLMSIS 2.1 (БАЗОВАЯ), 0 = NRLMSISE-00 (для сверки
-                    с инструментами демиза вроде DRAMA и для бюджета
-                    неопределённостей).
+    Environment parameters are physical, not cosmetic:
+      f107, f107a : 10.7 cm flux, solar activity index. ~70 at solar minimum,
+                    ~140 moderate, ~220 at maximum. Mostly affects the
+                    thermosphere (above 100 km), where deceleration is
+                    negligible anyway. Checked by a sweep.
+      ap          : geomagnetic index. 4 is quiet, 50+ is a storm.
+      lat, lon    : controlled deorbits usually target the South Pacific Ocean
+                    Uninhabited Area (SPOUA), roughly -40 deg latitude.
+      version     : 2.1 = NRLMSIS 2.1 (BASELINE), 0 = NRLMSISE-00 (for
+                    comparison with demise tools such as DRAMA and for the
+                    uncertainty budget).
 
-                    Почему базовая 2.1. В NRLMSISE-00 термосферные плотности
-                    считались независимо от нижних слоёв, а профили сшивались
-                    апостериорно — отсюда излом производной ln(rho) на 72.5 км,
-                    прямо в зоне абляции (см. verify_step2.test_model_seams).
-                    В NRLMSIS 2.0 сшивку убрали: гидростатический профиль
-                    непрерывен от земли до экзосферы, переход от перемешанной
-                    области к диффузионному разделению идёт непрерывно начиная
-                    примерно с 70 км. Emmert et al. 2021 (Earth and Space
-                    Science): "In the mesosphere and below, residual biases and
-                    standard deviations are considerably lower than NRLMSISE-00";
-                    туда же ассимилированы новые данные по температуре мезосферы
-                    и стратосферы, атомарный кислород продлён вниз до 50 км.
-                    Расхождение с 00 составляет 9-16% именно на 50-90 км.
+                    Why 2.1 is the baseline. In NRLMSISE-00 thermospheric
+                    densities were computed independently of the lower layers
+                    and the profiles were stitched a posteriori, which gives a
+                    kink in d ln(rho)/dh at 72.5 km, right in the ablation zone
+                    (see verify_step2.test_model_seams). NRLMSIS 2.0 removed the
+                    stitching: the hydrostatic profile is continuous from the
+                    ground to the exosphere, and the transition from the mixed
+                    region to diffusive separation is continuous from about
+                    70 km. Emmert et al. 2021 (Earth and Space Science): "In the
+                    mesosphere and below, residual biases and standard
+                    deviations are considerably lower than NRLMSISE-00"; new
+                    mesospheric and stratospheric temperature data were
+                    assimilated, and atomic oxygen extends down to 50 km.
+                    The difference from 00 is 9-16% exactly at 50-90 km.
     """
 
     def __init__(
@@ -114,7 +114,7 @@ class MSISAtmosphere:
         h_max: float = 200.0e3,
         dh: float = 250.0,
     ):
-        import pymsis  # локальный импорт: шаг 1 работает без pymsis
+        import pymsis  # local import: step 1 works without pymsis
 
         self.date = date
         self.lat, self.lon = lat, lon
@@ -132,8 +132,8 @@ class MSISAtmosphere:
         )
         rho = out[..., pymsis.Variable.MASS_DENSITY].ravel()
 
-        # MSIS может вернуть NaN у самой земли для некоторых версий —
-        # обрезаем сетку по валидным значениям, а не подставляем заглушку.
+        # MSIS can return NaN right at the ground for some versions: trim the
+        # grid to valid values instead of substituting a placeholder.
         good = np.isfinite(rho) & (rho > 0)
         if not good.all():
             self._h_grid = self._h_grid[good]
@@ -142,19 +142,19 @@ class MSISAtmosphere:
         self._log_rho = CubicSpline(self._h_grid, np.log(rho))
         self._h_lo, self._h_hi = self._h_grid[0], self._h_grid[-1]
 
-        # Шкала высот на верхней границе — для экспоненциальной экстраполяции
+        # Scale height at the top of the grid, for exponential extrapolation
         self._H_top = -1.0 / self._log_rho(self._h_hi, 1)
         self._log_rho_top = float(self._log_rho(self._h_hi))
 
-        # Совместимость с ExponentialAtmosphere: rho у поверхности
+        # Compatibility with ExponentialAtmosphere: surface density
         self.rho0 = float(np.exp(self._log_rho(self._h_lo)))
 
     def density(self, h):
-        """Плотность, кг/м^3. h — геометрическая высота, м."""
+        """Density, kg/m^3. h is geometric altitude, m."""
         h = np.asarray(h, dtype=float)
         h_clipped = np.clip(h, self._h_lo, self._h_hi)
         log_rho = self._log_rho(h_clipped)
-        # Выше сетки — экспоненциальная экстраполяция с верхней шкалой высот.
+        # Above the grid: exponential extrapolation with the top scale height.
         above = h > self._h_hi
         if np.any(above):
             log_rho = np.where(
@@ -165,11 +165,11 @@ class MSISAtmosphere:
         return np.exp(log_rho)
 
     def scale_height(self, h):
-        """ЛОКАЛЬНАЯ шкала высот H = -1/(d ln rho / dh), м.
+        """LOCAL scale height H = -1/(d ln rho / dh), m.
 
-        В отличие от экспоненциальной модели это не константа. Именно
-        разброс этой величины по высоте и есть мера того, насколько
-        однопараметрическая заглушка отличается от реальной атмосферы.
+        Unlike the exponential model this is not a constant. Its spread over
+        altitude measures how far the one-parameter placeholder is from the
+        real atmosphere.
         """
         h_clipped = np.clip(np.asarray(h, dtype=float), self._h_lo, self._h_hi)
         return -1.0 / self._log_rho(h_clipped, 1)

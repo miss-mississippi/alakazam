@@ -1,8 +1,9 @@
-"""Шаг 1: экспоненциальная атмосфера + интегрирование траектории от 120 км.
+"""Step 1: exponential atmosphere + trajectory integration from 120 km.
 
-Запуск:  python run_step1.py
+Run:     python run_step1.py
 
-Выход: step1_trajectory.png, step1_gamma_sweep.png и сверочная таблица в консоли.
+Output:  figures/step1_trajectory.png, figures/step1_gamma_sweep.png and a
+         comparison table in the console.
 """
 
 from __future__ import annotations
@@ -16,9 +17,9 @@ from reentry import EntryState, ExponentialAtmosphere, Vehicle, allen_eggers, in
 from reentry.constants import G0
 from reentry.results import Recorder
 
-# Шаги 1-2 определены для НЕВРАЩАЮЩЕЙСЯ Земли: вращение атмосферы вводится
-# на шаге 3. С тех пор integrate() включает его по умолчанию, поэтому
-# здесь оно выключено явно — иначе цифры шагов 1-2 не воспроизводятся.
+# Steps 1-2 are defined for a NON-ROTATING Earth: atmospheric rotation is
+# introduced in step 3. integrate() turns it on by default, so it is switched
+# off explicitly here; otherwise the step 1-2 numbers do not reproduce.
 NO_ROT = dict(earth_rotation=False)
 R = Recorder("step1")
 
@@ -38,33 +39,33 @@ def print_report(traj, ae, vehicle, entry, atmosphere):
 
     print()
     print("=" * 68)
-    print("ШАГ 1 — ТРАЕКТОРИЯ, ЭКСПОНЕНЦИАЛЬНАЯ АТМОСФЕРА (ЗАГЛУШКА)")
+    print("STEP 1: TRAJECTORY, EXPONENTIAL ATMOSPHERE (PLACEHOLDER)")
     print("=" * 68)
-    print(f"  масса              {vehicle.mass:8.1f} кг")
-    print(f"  Cd * A             {vehicle.Cd * vehicle.area:8.2f} м^2")
-    print(f"  beta = m/(Cd A)    {vehicle.ballistic_coefficient:8.1f} кг/м^2")
-    print(f"  вход               h={entry.altitude/1e3:.0f} км, "
-          f"V={entry.velocity:.0f} м/с, gamma={entry.gamma_deg:+.2f} град")
-    print(f"  атмосфера          {atmosphere.name}, "
-          f"rho0={atmosphere.rho0} кг/м^3, H={atmosphere.H/1e3:.1f} км")
+    print(f"  mass               {vehicle.mass:8.1f} kg")
+    print(f"  Cd * A             {vehicle.Cd * vehicle.area:8.2f} m^2")
+    print(f"  beta = m/(Cd A)    {vehicle.ballistic_coefficient:8.1f} kg/m^2")
+    print(f"  entry              h={entry.altitude/1e3:.0f} km, "
+          f"V={entry.velocity:.0f} m/s, gamma={entry.gamma_deg:+.2f} deg")
+    print(f"  atmosphere         {atmosphere.name}, "
+          f"rho0={atmosphere.rho0} kg/m^3, H={atmosphere.H/1e3:.1f} km")
     print()
-    print(f"  остановка:         {traj.stop_reason}")
-    print(f"  длительность:      {traj.t[-1]:8.1f} с")
-    print(f"  дальность:         {traj.s[-1]/1e3:8.0f} км")
+    print(f"  stop:              {traj.stop_reason}")
+    print(f"  duration:          {traj.t[-1]:8.1f} s")
+    print(f"  downrange:         {traj.s[-1]/1e3:8.0f} km")
     i_peak = int(np.argmax(traj.decel))
-    print(f"  gamma в пике:      {traj.gamma_deg[i_peak]:+8.2f} град "
-          f"(в начале {entry.gamma_deg:+.2f})")
-    print(f"  gamma в конце:     {traj.gamma_deg[-1]:+8.2f} град")
-    print(f"  V в конце:         {traj.V[-1]:8.0f} м/с "
-          f"на {traj.h[-1]/1e3:.1f} км")
+    print(f"  gamma at peak:     {traj.gamma_deg[i_peak]:+8.2f} deg "
+          f"(initially {entry.gamma_deg:+.2f})")
+    print(f"  gamma at end:      {traj.gamma_deg[-1]:+8.2f} deg")
+    print(f"  V at end:          {traj.V[-1]:8.0f} m/s "
+          f"at {traj.h[-1]/1e3:.1f} km")
     print()
-    print("  СВЕРКА С АЛЛЕНОМ-ЭГГЕРСОМ (ожидание: расхождение 20-30%,")
-    print("  т.к. у нас gamma не постоянна и первые ~100 с полёт бездрагвый)")
-    print(f"    {'величина':<26}{'численно':>12}{'Аллен-Эггерс':>15}{'откл.':>10}")
+    print("  ALLEN-EGGERS COMPARISON (gamma is not constant and the first")
+    print("  ~100 s are drag-free, so A-E with gamma0 is not expected to match)")
+    print(f"    {'quantity':<26}{'numerical':>12}{'Allen-Eggers':>15}{'dev.':>10}")
     rows = [
-        ("макс. торможение, g", a_num / G0, ae["a_max"] / G0),
-        ("высота пика, км", h_num / 1e3, ae["h_at_peak"] / 1e3),
-        ("скорость в пике, м/с", v_num, ae["V_at_peak"]),
+        ("max deceleration, g", a_num / G0, ae["a_max"] / G0),
+        ("peak altitude, km", h_num / 1e3, ae["h_at_peak"] / 1e3),
+        ("speed at peak, m/s", v_num, ae["V_at_peak"]),
     ]
     R["base.t_end"] = traj.t[-1]
     R["base.range_km"] = traj.s[-1] / 1e3
@@ -90,62 +91,62 @@ def figure_main(traj, ae, atmosphere, entry, path="figures/step1_trajectory.png"
 
     ax = axes[0, 0]
     ax.plot(t, h_km, lw=1.6)
-    ax.set_xlabel("время, с"); ax.set_ylabel("высота, км")
+    ax.set_xlabel("time, s"); ax.set_ylabel("altitude, km")
     ax.set_title("h(t)")
 
     ax = axes[0, 1]
     ax.plot(t, traj.V / 1e3, lw=1.6)
     ax.axhline(ae["V_at_peak"] / 1e3, color="crimson", ls="--", lw=1,
-               label=r"А-Э: $V_0/\sqrt{e}$")
-    ax.set_xlabel("время, с"); ax.set_ylabel("скорость, км/с")
+               label=r"A-E: $V_0/\sqrt{e}$")
+    ax.set_xlabel("time, s"); ax.set_ylabel("speed, km/s")
     ax.set_title("V(t)"); ax.legend(frameon=False, fontsize=8)
 
     ax = axes[0, 2]
     ax.plot(t, traj.gamma_deg, lw=1.6)
     ax.axhline(entry.gamma_deg, color="grey", ls=":", lw=1, label="$\\gamma_0$")
-    ax.set_xlabel("время, с"); ax.set_ylabel("угол наклона, град")
-    ax.set_title(r"$\gamma(t)$ — уходит от $-1.5°$ к $-21°$")
+    ax.set_xlabel("time, s"); ax.set_ylabel("flight-path angle, deg")
+    ax.set_title(r"$\gamma(t)$ goes from $-1.5°$ to $-21°$")
     ax.legend(frameon=False, fontsize=8)
 
     ax = axes[1, 0]
     ax.plot(traj.V / 1e3, h_km, lw=1.6)
-    ax.set_xlabel("скорость, км/с"); ax.set_ylabel("высота, км")
-    ax.set_title("V(h) — фазовый портрет")
+    ax.set_xlabel("speed, km/s"); ax.set_ylabel("altitude, km")
+    ax.set_title("V(h): phase portrait")
 
     ax = axes[1, 1]
     a_num, h_num, _ = traj.peak_decel()
     ax.plot(traj.decel / G0, h_km, lw=1.6)
     ax.plot(ae["a_max"] / G0, ae["h_at_peak"] / 1e3, "x", color="crimson",
-            ms=9, mew=2, label="Аллен-Эггерс")
+            ms=9, mew=2, label="Allen-Eggers")
     ax.plot(a_num / G0, h_num / 1e3, "o", mfc="none", color="tab:blue",
-            ms=9, mew=1.6, label="численно")
-    ax.set_xlabel("аэродинамическое торможение, g"); ax.set_ylabel("высота, км")
-    ax.set_title("перегрузка по высоте"); ax.legend(frameon=False, fontsize=8)
+            ms=9, mew=1.6, label="numerical")
+    ax.set_xlabel("aerodynamic deceleration, g"); ax.set_ylabel("altitude, km")
+    ax.set_title("deceleration vs altitude"); ax.legend(frameon=False, fontsize=8)
 
     ax = axes[1, 2]
     hh = np.linspace(30e3, 120e3, 300)
-    ax.semilogx(atmosphere.density(hh), hh / 1e3, lw=1.6, label="заглушка")
-    # реперные точки U.S. Standard Atmosphere 1976 — насколько заглушка врёт
+    ax.semilogx(atmosphere.density(hh), hh / 1e3, lw=1.6, label="placeholder")
+    # U.S. Standard Atmosphere 1976 reference points: how far off the placeholder is
     ref_h = np.array([40, 60, 80, 100, 120])
     ref_rho = np.array([4.0e-3, 3.1e-4, 1.85e-5, 5.6e-7, 2.2e-8])
     ax.semilogx(ref_rho, ref_h, "s", color="crimson", ms=5, label="USSA-76")
-    ax.set_xlabel(r"плотность, кг/м$^3$"); ax.set_ylabel("высота, км")
-    ax.set_title("заглушка точна там, где идёт абляция")
+    ax.set_xlabel(r"density, kg/m$^3$"); ax.set_ylabel("altitude, km")
+    ax.set_title("placeholder is accurate where ablation happens")
     ax.legend(frameon=False, fontsize=8)
 
-    fig.suptitle("Шаг 1: 3-DOF траектория входа, экспоненциальная атмосфера "
-                 "(заглушка), масса постоянна", fontsize=11)
+    fig.suptitle("Step 1: 3-DOF entry trajectory, exponential atmosphere "
+                 "(placeholder), constant mass", fontsize=11)
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
-    print(f"  сохранено: {path}")
+    print(f"  saved: {path}")
 
 
 def figure_gamma_sweep(vehicle, atmosphere, path="figures/step1_gamma_sweep.png"):
-    """Чувствительность к углу входа — диапазон -1...-3 град это разные режимы."""
+    """Sensitivity to the entry angle: -1...-3 deg are different regimes."""
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.8))
-    print("  чувствительность к углу входа:")
-    print(f"    {'gamma0':>8}{'время, с':>12}{'дальность, км':>16}"
-          f"{'макс g':>10}{'h пика, км':>13}")
+    print("  sensitivity to the entry angle:")
+    print(f"    {'gamma0':>8}{'time, s':>12}{'downrange, km':>16}"
+          f"{'max g':>10}{'peak h, km':>13}")
 
     for g0 in (-1.0, -1.5, -2.0, -3.0):
         entry = EntryState(gamma_deg=g0)
@@ -163,19 +164,19 @@ def figure_gamma_sweep(vehicle, atmosphere, path="figures/step1_gamma_sweep.png"
         print(f"    {g0:>+8.1f}{traj.t[-1]:>12.0f}{traj.s[-1]/1e3:>16.0f}"
               f"{a/G0:>10.1f}{hp/1e3:>13.1f}")
 
-    axes[0].set_xlabel("время, с"); axes[0].set_ylabel("высота, км")
+    axes[0].set_xlabel("time, s"); axes[0].set_ylabel("altitude, km")
     axes[0].set_title("h(t)")
-    axes[1].set_xlabel("время, с"); axes[1].set_ylabel("скорость, км/с")
+    axes[1].set_xlabel("time, s"); axes[1].set_ylabel("speed, km/s")
     axes[1].set_title("V(t)")
-    axes[2].set_xlabel("торможение, g"); axes[2].set_ylabel("высота, км")
-    axes[2].set_title("перегрузка по высоте")
+    axes[2].set_xlabel("deceleration, g"); axes[2].set_ylabel("altitude, km")
+    axes[2].set_title("deceleration vs altitude")
     axes[0].legend(frameon=False, fontsize=8)
-    fig.suptitle("Чувствительность к углу входа: время полёта различается в 1.6 раза, "
-                 "а высота пика почти не сдвигается —\nгравитационный разворот стирает "
-                 r"$\gamma_0$ раньше, чем включается торможение", fontsize=10)
+    fig.suptitle("Sensitivity to the entry angle: flight time differs by 1.6x "
+                 "while the peak altitude barely moves:\nthe gravity turn erases "
+                 r"$\gamma_0$ before drag turns on", fontsize=10)
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
-    print(f"\n  сохранено: {path}")
+    print(f"\n  saved: {path}")
 
 
 def main():

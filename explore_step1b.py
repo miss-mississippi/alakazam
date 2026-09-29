@@ -1,17 +1,17 @@
-"""Диагностика шага 1: где на самом деле идёт вброс. Запуск: python explore_step1b.py
+"""Step 1 diagnostics: where injection actually happens. Run: python explore_step1b.py
 
-НЕ реализация шага 4 — это what-if прогоны на существующей траекторной
-модели, чтобы проверить три вещи до того, как менять план сборки:
+NOT an implementation of step 4: what-if runs on the existing trajectory model
+to check three things before changing the build plan:
 
-  A. Где пикует НАГРЕВ (а не торможение). Высота пика sqrt(rho)*V^3 не
-     зависит ни от k Саттона-Грейвса, ни от радиуса затупления, поэтому
-     считается уже сейчас.
-  B. Разброс по Cd = 1.0 / 1.5 / 2.2.
-  C. Закрывает ли фрагментация разрыв в 25-30 км до наблюдаемых 70-80 км.
+  A. Where HEATING peaks (not deceleration). The altitude of the
+     sqrt(rho)*V^3 peak depends neither on the Sutton-Graves k nor on the
+     nose radius, so it can be computed already.
+  B. Spread over Cd = 1.0 / 1.5 / 2.2.
+  C. Whether fragmentation closes the 25-30 km gap to the observed 70-80 km.
 
-Наблюдательный репер: ATV-1 разрушился на 74 км, Cygnus OA6 на 70 км,
-Cluster II (SALSA) на 80 км (Ferreira, UNOOSA/IAF 2024). Настройки SESAM
-по умолчанию: отрыв панелей 95 км, разрушение корпуса 78 км (Lips, SDC6).
+Observational reference: ATV-1 broke up at 74 km, Cygnus OA6 at 70 km,
+Cluster II (SALSA) at 80 km (Ferreira, UNOOSA/IAF 2024). SESAM defaults:
+panel separation at 95 km, main breakup at 78 km (Lips, SDC6).
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ from reentry import EntryState, ExponentialAtmosphere, Vehicle, integrate
 from reentry.constants import G0
 from reentry.results import Recorder
 
-# Шаги 1-2 определены для НЕВРАЩАЮЩЕЙСЯ Земли: вращение атмосферы вводится
-# на шаге 3. С тех пор integrate() включает его по умолчанию, поэтому
-# здесь оно выключено явно — иначе цифры шагов 1-2 не воспроизводятся.
+# Steps 1-2 are defined for a NON-ROTATING Earth: atmospheric rotation is
+# introduced in step 3. integrate() turns it on by default, so it is switched
+# off explicitly here; otherwise the step 1-2 numbers do not reproduce.
 NO_ROT = dict(earth_rotation=False)
 R = Recorder("step1b")
 
@@ -35,22 +35,22 @@ R = Recorder("step1b")
 ATM = ExponentialAtmosphere()
 ENTRY = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5)
 
-OBSERVED_LO, OBSERVED_HI = 70.0, 80.0   # км, наблюдённые события разрушения
+OBSERVED_LO, OBSERVED_HI = 70.0, 80.0   # km, observed breakup events
 
 
 def part_a_heating_peak():
-    print("A. ГДЕ ПИКУЕТ НАГРЕВ, А НЕ ТОРМОЖЕНИЕ")
-    print("   q ~ sqrt(rho)*V^3 против a ~ rho*V^2: скорость весит сильнее,")
-    print("   плотность слабее, значит пик нагрева выше и раньше.\n")
+    print("A. WHERE HEATING PEAKS, NOT DECELERATION")
+    print("   q ~ sqrt(rho)*V^3 against a ~ rho*V^2: speed weighs more,")
+    print("   density less, so the heating peak is higher and earlier.\n")
     veh = Vehicle(mass=175.0, area=1.0, Cd=1.0)
     tr = integrate(veh, ENTRY, ATM, **NO_ROT)
     a, h_a, v_a = tr.peak_decel()
     h_q, v_q, t_q = tr.peak_heating()
-    print(f"   пик торможения   {h_a/1e3:6.1f} км   V = {v_a:5.0f} м/с   "
+    print(f"   deceleration peak {h_a/1e3:6.1f} km   V = {v_a:5.0f} m/s   "
           f"({a/G0:.1f} g)")
-    print(f"   пик нагрева      {h_q/1e3:6.1f} км   V = {v_q:5.0f} м/с   "
-          f"t = {t_q:.0f} с")
-    print(f"   разнос           {(h_q - h_a)/1e3:6.1f} км\n")
+    print(f"   heating peak      {h_q/1e3:6.1f} km   V = {v_q:5.0f} m/s   "
+          f"t = {t_q:.0f} s")
+    print(f"   separation        {(h_q - h_a)/1e3:6.1f} km\n")
     R["peaks.decel_h_km"] = h_a / 1e3
     R["peaks.decel_V"] = v_a
     R["peaks.decel_g"] = a / G0
@@ -61,12 +61,12 @@ def part_a_heating_peak():
 
 
 def part_b_cd_sweep():
-    print("B. РАЗБРОС ПО Cd")
-    print("   1.0 — тупое тело в континууме, нижняя граница")
-    print("   1.5 — беспорядочно кувыркающееся нерегулярное тело")
-    print("   2.2 — свободномолекулярный предел / очень нерегулярное тело\n")
-    print(f"   {'Cd':>5}{'beta, кг/м^2':>14}{'h торм., км':>14}"
-          f"{'h нагрева, км':>16}{'макс g':>9}")
+    print("B. SPREAD OVER Cd")
+    print("   1.0: blunt body in continuum, lower bound")
+    print("   1.5: randomly tumbling irregular body")
+    print("   2.2: free-molecular limit / very irregular body\n")
+    print(f"   {'Cd':>5}{'beta, kg/m^2':>14}{'h decel, km':>14}"
+          f"{'h heating, km':>16}{'max g':>9}")
     out = {}
     for Cd in (1.0, 1.5, 2.2):
         veh = Vehicle(mass=175.0, area=1.0, Cd=Cd)
@@ -84,50 +84,50 @@ def part_b_cd_sweep():
     span_q = (out[2.2][1] - out[1.0][1]) / 1e3
     R["cd.span_decel_km"] = span_a
     R["cd.span_heat_km"] = span_q
-    print(f"\n   разброс по высоте: торможение {span_a:+.1f} км, "
-          f"нагрев {span_q:+.1f} км")
-    print("   -> неопределённость Cd стоит меньше, чем разрыв до 70-80 км\n")
+    print(f"\n   altitude spread: deceleration {span_a:+.1f} km, "
+          f"heating {span_q:+.1f} km")
+    print("   -> the Cd uncertainty costs less than the gap to 70-80 km\n")
     return out
 
 
 def fragment_run(beta_ratio: float, h_frag: float, Cd: float = 1.5):
-    """Целый объект до h_frag, затем осколки с beta / beta_ratio.
+    """Intact object down to h_frag, then fragments with beta / beta_ratio.
 
-    При геометрически подобном дроблении m ~ L^3, A ~ L^2, значит
-    beta = m/(Cd A) ~ L. Куски вдесятеро меньше по линейному размеру
-    дают beta вдесятеро меньше.
+    For geometrically similar fragmentation m ~ L^3 and A ~ L^2, so
+    beta = m/(Cd A) ~ L. Pieces ten times smaller in linear size have ten
+    times smaller beta.
     """
     intact = Vehicle(mass=175.0, area=1.0, Cd=Cd)
     tr0 = integrate(intact, ENTRY, ATM, h_stop=h_frag, **NO_ROT)
     restart = tr0.state_at_altitude(h_frag)
 
-    # Сохраняем массу, режем beta через площадь: A_эфф = A * beta_ratio
+    # Keep the mass, cut beta through the area: A_eff = A * beta_ratio
     frag = Vehicle(mass=175.0, area=1.0 * beta_ratio, Cd=Cd)
     tr1 = integrate(frag, restart, ATM, **NO_ROT)
     return tr0, tr1, frag
 
 
 def part_c_fragmentation():
-    print("C. ЗАКРЫВАЕТ ЛИ ФРАГМЕНТАЦИЯ РАЗРЫВ")
-    print(f"   наблюдения: разрушение на {OBSERVED_LO:.0f}-{OBSERVED_HI:.0f} км "
+    print("C. DOES FRAGMENTATION CLOSE THE GAP")
+    print(f"   observations: breakup at {OBSERVED_LO:.0f}-{OBSERVED_HI:.0f} km "
           "(ATV-1 74, Cygnus OA6 70, SALSA 80)")
-    print("   SESAM по умолчанию: панели 95 км, корпус 78 км\n")
+    print("   SESAM defaults: panels 95 km, main body 78 km\n")
 
-    print("   C1. Разрушение на 78 км, разное дробление (Cd = 1.5):")
-    print(f"   {'beta осколка':>14}{'отношение':>12}{'h нагрева, км':>16}"
-          f"{'в окне?':>10}")
+    print("   C1. Breakup at 78 km, different fragmentation (Cd = 1.5):")
+    print(f"   {'fragment beta':>14}{'ratio':>12}{'h heating, km':>16}"
+          f"{'in window?':>12}")
     for ratio in (1, 2, 5, 10, 20, 50):
         _, tr1, frag = fragment_run(ratio, 78e3)
         h_q, _, _ = tr1.peak_heating()
         inside = OBSERVED_LO <= h_q / 1e3 <= OBSERVED_HI
-        clipped = "  <- пик НА разрушении" if h_q > 77.9e3 else ""
+        clipped = "  <- peak AT breakup" if h_q > 77.9e3 else ""
         R[f"frag.r{ratio}.beta"] = frag.ballistic_coefficient
         R[f"frag.r{ratio}.h_heat_km"] = h_q / 1e3
         print(f"   {frag.ballistic_coefficient:>14.1f}{'1/' + str(ratio):>12}"
-              f"{h_q/1e3:>16.1f}{'да' if inside else '':>10}{clipped}")
+              f"{h_q/1e3:>16.1f}{'yes' if inside else '':>12}{clipped}")
 
-    print("\n   C2. Дробление в 10 раз, разная высота разрушения:")
-    print(f"   {'h разруш., км':>15}{'h нагрева, км':>16}{'сдвиг':>10}")
+    print("\n   C2. Fragmentation by 10, different breakup altitudes:")
+    print(f"   {'h breakup, km':>15}{'h heating, km':>16}{'shift':>10}")
     base = None
     for hf in (95e3, 84e3, 78e3, 70e3):
         _, tr1, _ = fragment_run(10, hf)
@@ -138,7 +138,7 @@ def part_c_fragmentation():
         print(f"   {hf/1e3:>15.0f}{h_q/1e3:>16.1f}{(h_q-base)/1e3:>+10.1f}")
     print()
 
-    # Обратная задача: какой beta осколка кладёт пик нагрева в середину окна
+    # Inverse problem: which fragment beta puts the heating peak mid-window
     target = 0.5 * (OBSERVED_LO + OBSERVED_HI) * 1e3
     ratios = np.logspace(0, 2.3, 40)
     heights = []
@@ -153,45 +153,45 @@ def part_c_fragmentation():
     R["inverse.beta_needed"] = beta_needed
     R["inverse.factor"] = factor
     R["inverse.n_fragments"] = factor ** 3
-    print(f"   C3. Обратная задача: чтобы пик нагрева лёг на {target/1e3:.0f} км,")
-    print(f"       нужен beta осколка ~ {beta_needed:.1f} кг/м^2 против "
-          f"{beta_intact:.1f} у целого,")
-    print(f"       то есть падение beta в {factor:.1f} раза.")
-    print(f"       При геометрически подобном дроблении beta ~ L, а L ~ N^(-1/3),")
-    print(f"       значит нужно N ~ {factor**3:.0f} равных осколков.")
-    print(f"       Это много. Реальный разброс beta даёт не равное дробление,")
-    print(f"       а спектр: панели и MLI имеют beta ~1-10, силовой набор ~30-80.\n")
+    print(f"   C3. Inverse problem: for the heating peak to sit at {target/1e3:.0f} km,")
+    print(f"       a fragment needs beta ~ {beta_needed:.1f} kg/m^2 against "
+          f"{beta_intact:.1f} for the intact body,")
+    print(f"       i.e. a {factor:.1f}x drop in beta.")
+    print(f"       For geometrically similar fragmentation beta ~ L and L ~ N^(-1/3),")
+    print(f"       so N ~ {factor**3:.0f} equal fragments would be needed.")
+    print(f"       That is a lot. Real fragmentation gives a spectrum of beta, not")
+    print(f"       equal pieces: panels and MLI have beta ~1-10, structure ~30-80.\n")
 
-    print("   ВАЖНАЯ ОГОВОРКА: пик sqrt(rho)*V^3 — это ВЕРХНЯЯ ГРАНИЦА высоты")
-    print("   вброса, а не сам вброс. Испарение требует НАКОПЛЕННОГО тепла:")
-    print("   сначала прогрев до ~900 K, потом плавление, потом кипение (~2000 K")
-    print("   на местном давлении торможения, 2792 K при 1 атм).")
-    print("   Масса пойдёт ниже пика потока. Насколько — покажет шаг 4.")
-    print("   Поэтому подгонять beta так, чтобы пик потока лёг ровно в 70-80 км,")
-    print("   было бы ошибкой: тогда сама масса окажется слишком низко.\n")
+    print("   IMPORTANT CAVEAT: the sqrt(rho)*V^3 peak is an UPPER BOUND on the")
+    print("   injection altitude, not the injection itself. Vaporization needs")
+    print("   ACCUMULATED heat: heating to ~900 K, then melting, then boiling")
+    print("   (~2000 K at the local stagnation pressure, 2792 K at 1 atm).")
+    print("   The mass will be injected below the flux peak; step 4 shows how far.")
+    print("   So tuning beta to put the flux peak exactly at 70-80 km would be")
+    print("   a mistake: the mass itself would then end up too low.\n")
     return ratios, heights
 
 
 def figure(ratios, heights, path="figures/step1b_fragmentation.png"):
     fig, axes = plt.subplots(1, 3, figsize=(13, 4.0))
 
-    # 1: форма нагрева vs торможения для целого объекта
+    # 1: heating vs deceleration shape for the intact object
     ax = axes[0]
     veh = Vehicle(mass=175.0, area=1.0, Cd=1.5)
     tr = integrate(veh, ENTRY, ATM, **NO_ROT)
     q = tr.heat_flux_shape / tr.heat_flux_shape.max()
     a = tr.decel / tr.decel.max()
-    ax.plot(q, tr.h / 1e3, lw=1.7, label=r"нагрев $\sqrt{\rho}V^3$")
-    ax.plot(a, tr.h / 1e3, lw=1.7, ls="--", label=r"торможение $\rho V^2$")
+    ax.plot(q, tr.h / 1e3, lw=1.7, label=r"heating $\sqrt{\rho}V^3$")
+    ax.plot(a, tr.h / 1e3, lw=1.7, ls="--", label=r"deceleration $\rho V^2$")
     ax.axhspan(OBSERVED_LO, OBSERVED_HI, color="seagreen", alpha=0.15)
-    ax.text(0.5, (OBSERVED_LO + OBSERVED_HI) / 2, "наблюдаемое\nразрушение",
+    ax.text(0.5, (OBSERVED_LO + OBSERVED_HI) / 2, "observed\nbreakup",
             fontsize=7.5, color="seagreen", ha="center", va="center")
-    ax.set_xlabel("нормировано на максимум"); ax.set_ylabel("высота, км")
-    ax.set_title("целый объект: оба пика\nсильно ниже наблюдений", fontsize=9.5)
+    ax.set_xlabel("normalized to maximum"); ax.set_ylabel("altitude, km")
+    ax.set_title("intact object: both peaks\nfar below observations", fontsize=9.5)
     ax.legend(frameon=False, fontsize=8, loc="upper right")
     ax.set_ylim(30, 120)
 
-    # 2: траектории осколков разного дробления
+    # 2: fragment trajectories for different fragmentation
     ax = axes[1]
     for ratio, color in zip((1, 5, 20, 50),
                             ("tab:blue", "tab:orange", "tab:green", "tab:red")):
@@ -201,30 +201,30 @@ def figure(ratios, heights, path="figures/step1b_fragmentation.png"):
                 label=fr"$\beta$={frag.ballistic_coefficient:.0f}")
     ax.axhspan(OBSERVED_LO, OBSERVED_HI, color="seagreen", alpha=0.15)
     ax.axhline(78, color="k", ls=":", lw=1)
-    ax.text(0.02, 79, "разрушение 78 км", fontsize=7.5)
-    ax.set_xlabel("нагрев, нормирован"); ax.set_ylabel("высота, км")
-    ax.set_title("осколки после разрушения на 78 км", fontsize=9.5)
+    ax.text(0.02, 79, "breakup at 78 km", fontsize=7.5)
+    ax.set_xlabel("heating, normalized"); ax.set_ylabel("altitude, km")
+    ax.set_title("fragments after breakup at 78 km", fontsize=9.5)
     ax.legend(frameon=False, fontsize=8, loc="lower right")
     ax.set_ylim(30, 100)
 
-    # 3: высота пика нагрева как функция beta осколка
+    # 3: heating-peak altitude as a function of fragment beta
     ax = axes[2]
     betas = 175.0 / (1.5 * ratios)
     ax.semilogx(betas, heights / 1e3, lw=1.8)
     ax.axhspan(OBSERVED_LO, OBSERVED_HI, color="seagreen", alpha=0.15,
-               label="наблюдения 70-80 км")
+               label="observations 70-80 km")
     ax.plot(175 / 1.5, heights[0] / 1e3, "o", color="crimson", ms=7,
-            label="целый объект")
-    ax.set_xlabel(r"$\beta$ осколка, кг/м$^2$")
-    ax.set_ylabel("высота пика нагрева, км")
-    ax.set_title(r"наклон $H\ln\beta$, затем полка" "\n" r"на высоте разрушения", fontsize=9.5)
+            label="intact object")
+    ax.set_xlabel(r"fragment $\beta$, kg/m$^2$")
+    ax.set_ylabel("heating-peak altitude, km")
+    ax.set_title(r"slope $H\ln\beta$, then a plateau" "\n" r"at the breakup altitude", fontsize=9.5)
     ax.legend(frameon=False, fontsize=8)
 
-    fig.suptitle("Диагностика: фрагментация как механизм, поднимающий высоту вброса",
+    fig.suptitle("Diagnostics: fragmentation as the mechanism that raises the injection altitude",
                  fontsize=11)
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
-    print(f"   сохранено: {path}")
+    print(f"   saved: {path}")
 
 
 if __name__ == "__main__":
@@ -234,4 +234,3 @@ if __name__ == "__main__":
     ratios, heights = part_c_fragmentation()
     figure(ratios, heights)
     R.save(__file__)
-    print()

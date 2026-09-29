@@ -1,19 +1,19 @@
-"""Сверка чисел в документах с results/*.json.
+"""Check the numbers in the documents against results/*.json.
 
-Метка ставится сразу после числа и в отрендеренном Markdown не видна:
+A tag goes right after a number and is invisible in rendered Markdown:
 
     8.5<!--=step5.scenarios.film.total:.1f-->
 
-Ключ — путь в results/ (см. reentry/results.py), формат — как в str.format
-(.1f, .0f, +.2f); без формата — .1f. Ключи checks.* считаются по исходникам:
-checks.total — число проверок test_* во всех verify_step*.py,
-checks.verify_stepN — в одном файле.
+The key is a path in results/ (see reentry/results.py) and the format is as
+in str.format (.1f, .0f, +.2f); without a format, .1f. The checks.* keys are
+counted from the sources: checks.total is the number of test_* checks in all
+verify_step*.py, checks.verify_stepN the number in one file.
 
-    python check_docs.py              README.md и docs/REPORT.md
-    python check_docs.py --fix        переписать числа из результатов
-    python check_docs.py FILE ...     конкретные файлы
+    python check_docs.py              README.md and docs/REPORT.md
+    python check_docs.py --fix        rewrite the numbers from the results
+    python check_docs.py FILE ...     specific files
 
-Код выхода 1, если есть расхождения или неизвестные ключи.
+Exit code 1 if there are mismatches or unknown keys.
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ def _normalize(num: str) -> str:
 
 
 def check_file(path: Path, fix: bool = False, cache: dict | None = None) -> list[str]:
-    """Возвращает список проблем; при fix=True переписывает числа."""
+    """Returns a list of problems; with fix=True rewrites the numbers."""
     cache = {} if cache is None else cache
     text = path.read_text()
     problems = []
@@ -69,7 +69,7 @@ def check_file(path: Path, fix: bool = False, cache: dict | None = None) -> list
         try:
             value = resolve(key, cache)
         except (KeyError, IndexError) as exc:
-            problems.append(f"{path.name}:{line}: неизвестный ключ {key} ({exc})")
+            problems.append(f"{path.name}:{line}: unknown key {key} ({exc})")
             return m.group(0)
         if value is None:
             problems.append(f"{path.name}:{line}: {key} = None")
@@ -83,7 +83,7 @@ def check_file(path: Path, fix: bool = False, cache: dict | None = None) -> list
             got_cmp = got_cmp[1:]
         if got_cmp == want_cmp:
             return m.group(0)
-        problems.append(f"{path.name}:{line}: {key}: в тексте {num}, в результатах {want}")
+        problems.append(f"{path.name}:{line}: {key}: text has {num}, results have {want}")
         if "−" in num:
             want = want.replace("-", "−")
         return f"{want}<!--={key}{':' + m['fmt'] if m['fmt'] else ''}-->"
@@ -109,12 +109,12 @@ def main(argv: list[str]) -> int:
         total += n
         problems = check_file(path, fix=fix, cache=cache)
         all_problems += problems
-        status = "исправлено" if fix and problems else ("OK" if not problems else "РАСХОЖДЕНИЯ")
-        print(f"{path}: меток {n}, расхождений {len(problems)} — {status}")
+        status = "fixed" if fix and problems else ("OK" if not problems else "MISMATCHES")
+        print(f"{path}: {n} tags, {len(problems)} mismatches: {status}")
     for p in all_problems:
         print("  " + p)
     if fix:
-        unknown = [p for p in all_problems if "неизвестный ключ" in p or "= None" in p]
+        unknown = [p for p in all_problems if "unknown key" in p or "= None" in p]
         return 1 if unknown else 0
     return 1 if all_problems else 0
 

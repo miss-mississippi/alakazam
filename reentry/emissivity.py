@@ -1,80 +1,83 @@
-"""Излучательная способность: модели поверхности и мост к лабораторному измерению.
+"""Emissivity: surface models and the bridge to a laboratory measurement.
 
-ЗАЧЕМ ЭТОТ МОДУЛЬ. Для тонкостенных фрагментов испарённая масса зависит от
-полной излучательной способности поверхности при рабочей температуре. Рабочая
-температура — это температура кипения Al при МЕСТНОМ давлении торможения,
-~1900-2050 K (см. ablation.Aluminium.T_boil_at), а не 2740 K при 1 атм.
+WHY THIS MODULE. For thin-walled fragments the vaporized mass depends on the
+total emissivity of the surface at the operating temperature. The operating
+temperature is the boiling point of Al at the LOCAL stagnation pressure,
+~1900-2050 K (see ablation.Aluminium.T_boil_at), not 2740 K at 1 atm.
 
-Две модели поверхности, обе как функции температуры:
+Two surface models, both as functions of temperature:
 
-  oxide_film_emissivity(T)   плёнка Al2O3 на металле: одна спектральная кривая
-                             eps(lam), подобранная по справочной точке
-                             alpha-Al2O3 (0.35 при 1800 K), и взвешенная по Планку.
-  bare_aluminium_emissivity(T)  голый металл без плёнки: оценка по
-                             электросопротивлению (Parker-Abbott).
+  oxide_film_emissivity(T)      Al2O3 film on metal: one spectral curve eps(lam)
+                                fitted to the alpha-Al2O3 reference point
+                                (0.35 at 1800 K) and Planck-weighted.
+  bare_aluminium_emissivity(T)  bare metal without a film: an estimate from
+                                electrical resistivity (Parker-Abbott).
 
-Обходной путь к измерению стандартный и реализуемый на комнатной оптике:
+The route to a measurement is standard and works with room-temperature optics:
 
-  1. Меряем СПЕКТРАЛЬНУЮ ОТРАЖАТЕЛЬНУЮ СПОСОБНОСТЬ R(lambda) образца при
-     комнатной температуре. Нужна полная (зеркальная + диффузная)
-     направленно-полусферическая R: интегрирующая сфера, в среднем ИК — с
-     золотым покрытием.
-  2. Для НЕПРОЗРАЧНОГО образца по закону Кирхгофа eps(lambda) = 1 - R(lambda).
-  3. Полная излучательная способность при температуре T получается
-     интегрированием по планковскому распределению:
+  1. Measure the SPECTRAL REFLECTANCE R(lambda) of a sample at room
+     temperature. It must be the total (specular + diffuse)
+     directional-hemispherical R: an integrating sphere, gold-coated in the
+     mid-IR.
+  2. For an OPAQUE sample, Kirchhoff's law gives eps(lambda) = 1 - R(lambda).
+  3. The total emissivity at temperature T follows from Planck weighting:
 
          eps(T) = int eps(lam) B(lam,T) dlam / int B(lam,T) dlam
 
-Это даёт eps ПРИ РАБОЧЕЙ ТЕМПЕРАТУРЕ из измерения ПРИ КОМНАТНОЙ.
+This gives eps AT THE OPERATING TEMPERATURE from a measurement AT ROOM
+TEMPERATURE.
 
-ЧЕСТНЫЕ ОГРАНИЧЕНИЯ, которые надо назвать до, а не после:
-  - Оптические константы сами зависят от температуры. Метод их не ловит.
-  - Реальная поверхность на входе — РАСПЛАВ с плёнкой, а меряем твёрдый
-    окисленный образец. Измерение прижимает сценарий "плёнка активна" и
-    порог по толщине; сценарий "голый расплав" так не меряется.
-  - Кирхгоф требует непрозрачности. Плёнка тоньше ~1 мкм в ИК полупрозрачна,
-    и тогда меряется система "плёнка на металле", что как раз и нужно, но
-    результат зависит от подложки — её надо фиксировать.
-  - Сфера даёт eps около нормали, модели нужна ПОЛУСФЕРИЧЕСКАЯ. Для металлов
-    полусферическая выше нормальной на 10-30%, для диэлектриков чуть ниже.
+HONEST LIMITATIONS, stated up front:
+  - Optical constants themselves depend on temperature. The method misses it.
+  - The real surface during entry is MELT with a film, while the sample is an
+    oxidized solid. The measurement constrains the "active film" scenario and
+    the thickness threshold; the "bare melt" scenario cannot be measured
+    this way.
+  - Kirchhoff requires opacity. A film thinner than ~1 um is semi-transparent
+    in the IR, so what is measured is the "film on metal" system, which is
+    what we need, but the result depends on the substrate, which must be
+    fixed.
+  - The sphere gives eps near normal incidence, the model needs the
+    HEMISPHERICAL value. For metals the hemispherical value is 10-30% above
+    normal, for dielectrics slightly below.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-H_PLANCK = 6.62607015e-34    # Дж*с (СИ, точное определение)
-C_LIGHT = 2.99792458e8       # м/с (точное)
-K_BOLTZ = 1.380649e-23       # Дж/К (точное)
-SIGMA_SB = 5.670374419e-8    # Вт/(м^2*К^4)
-WIEN_B = 2.897771955e-3      # м*К, постоянная смещения Вина
+H_PLANCK = 6.62607015e-34    # J*s (SI, exact)
+C_LIGHT = 2.99792458e8       # m/s (exact)
+K_BOLTZ = 1.380649e-23       # J/K (exact)
+SIGMA_SB = 5.670374419e-8    # W/(m^2*K^4)
+WIEN_B = 2.897771955e-3      # m*K, Wien displacement constant
 
 
 def planck_spectral_radiance(wavelength_m, T: float):
-    """Спектральная яркость чёрного тела B(lambda,T), Вт/(м^2*ср*м)."""
+    """Blackbody spectral radiance B(lambda,T), W/(m^2*sr*m)."""
     lam = np.asarray(wavelength_m, dtype=float)
     a = 2.0 * H_PLANCK * C_LIGHT ** 2 / lam ** 5
     x = H_PLANCK * C_LIGHT / (lam * K_BOLTZ * T)
-    # Клампим показатель: на очень коротких волнах exp переполняется,
-    # а вклад там всё равно нулевой.
+    # Clamp the exponent: exp overflows at very short wavelengths, where the
+    # contribution is zero anyway.
     return np.where(x < 700.0, a / np.expm1(np.minimum(x, 700.0)), 0.0)
 
 
 def planck_weight(wavelength_m, T: float):
-    """Нормированный планковский вес: int w dlam = 1 на заданной сетке."""
+    """Normalized Planck weight: int w dlam = 1 on the given grid."""
     lam = np.asarray(wavelength_m, dtype=float)
     B = planck_spectral_radiance(lam, T)
     return B / np.trapezoid(B, lam)
 
 
 def total_emissivity(wavelength_m, eps_lambda, T: float) -> float:
-    """Полная излучательная способность при температуре T.
+    """Total emissivity at temperature T.
 
         eps(T) = int eps(lam) B(lam,T) dlam / int B(lam,T) dlam
 
-    wavelength_m : м, возрастающая сетка
-    eps_lambda   : спектральная излучательная способность, 0..1
-                   (из измерения: eps = 1 - R для непрозрачного образца)
+    wavelength_m : m, increasing grid
+    eps_lambda   : spectral emissivity, 0..1
+                   (from a measurement: eps = 1 - R for an opaque sample)
     """
     lam = np.asarray(wavelength_m, dtype=float)
     e = np.asarray(eps_lambda, dtype=float)
@@ -83,22 +86,22 @@ def total_emissivity(wavelength_m, eps_lambda, T: float) -> float:
 
 
 def total_emissivity_from_reflectance(wavelength_m, reflectance, T: float) -> float:
-    """То же, но на вход подаётся ИЗМЕРЕННАЯ отражательная способность.
+    """Same, but the input is a MEASURED reflectance.
 
-    Ровно та функция, в которую лягут данные с прибора: массив длин волн
-    и массив R, снятые интегрирующей сферой.
+    Exactly the function the instrument data will go into: an array of
+    wavelengths and an array of R taken with an integrating sphere.
     """
     return total_emissivity(wavelength_m, 1.0 - np.asarray(reflectance), T)
 
 
 def required_band(T: float, coverage: float = 0.95,
                   lam_lo: float = 1e-7, lam_hi: float = 1e-3):
-    """Диапазон длин волн, несущий заданную долю планковской энергии.
+    """Wavelength range carrying a given fraction of the Planck energy.
 
-    Отвечает на прямой экспериментальный вопрос: какой спектральный диапазон
-    обязан покрыть прибор, чтобы интеграл не поехал.
+    Answers a direct experimental question: which spectral range must the
+    instrument cover so that the integral does not drift.
 
-    Возвращает (lam_min, lam_max, lam_peak) в метрах.
+    Returns (lam_min, lam_max, lam_peak) in metres.
     """
     lam = np.geomspace(lam_lo, lam_hi, 20000)
     B = planck_spectral_radiance(lam, T)
@@ -111,34 +114,34 @@ def required_band(T: float, coverage: float = 0.95,
 
 
 # ---------------------------------------------------------------------------
-# Сценарий "плёнка активна": спектральная кривая плёнки на металле
+# "Active film" scenario: spectral curve of a film on metal
 # ---------------------------------------------------------------------------
 
-LAM_GRID = np.geomspace(0.2e-6, 100e-6, 40000)   # м, сетка для взвешивания
+LAM_GRID = np.geomspace(0.2e-6, 100e-6, 40000)   # m, weighting grid
 
-# Справочные полные eps alpha-Al2O3 (сводка излучательных способностей
-# оксидов, White Rose eprints 133266): 0.83 при 300 K, 0.35 при 1800 K.
+# Reference total eps of alpha-Al2O3 (compilation of metal and oxide
+# emissivities, White Rose eprints 133266): 0.83 at 300 K, 0.35 at 1800 K.
 ALUMINA_REF = {300.0: 0.83, 1800.0: 0.35}
 
-# Форма по умолчанию. eps_short, eps_long, width выбраны рукой; lam_c
-# подбирается по ОДНОЙ справочной точке (1800 K). Свобода формы оценена
-# свипом в analysis_step5b (48 наборов).
+# Default shape. eps_short, eps_long and width are chosen by hand; lam_c is
+# fitted to ONE reference point (1800 K). Shape freedom is assessed by a
+# 48-set sweep in analysis_step5b.
 FILM_SHAPE_DEFAULT = dict(eps_short=0.05, eps_long=0.95, width=1.6)
 
 
 def eps_film(lam, eps_short=0.05, lam_c=3.98e-6, eps_long=0.95, width=1.6):
-    """eps(lam) для оксидной плёнки на металле.
+    """eps(lam) of an oxide film on metal.
 
-    Прозрачная область: виден МЕТАЛЛ под плёнкой, eps ~ eps_short.
-    Фононная область (многофононное поглощение Al2O3): eps ~ eps_long.
-    Край lam_c подбирается по справочной точке, см. fit_film_edge().
+    Transparent region: the METAL under the film is seen, eps ~ eps_short.
+    Phonon region (multiphonon absorption of Al2O3): eps ~ eps_long.
+    The edge lam_c is fitted to a reference point, see fit_film_edge().
     """
     return eps_short + (eps_long - eps_short) / (1.0 + (lam_c / lam) ** width)
 
 
 def fit_film_edge(eps_short=0.05, eps_long=0.95, width=1.6,
                   T_ref: float = 1800.0, eps_ref: float = ALUMINA_REF[1800.0]):
-    """lam_c, при котором кривая даёт справочную eps(T_ref). Метры."""
+    """lam_c at which the curve gives the reference eps(T_ref). Metres."""
     from scipy.optimize import brentq
     return float(brentq(lambda lc: total_emissivity(
         LAM_GRID, eps_film(LAM_GRID, eps_short, lc, eps_long, width), T_ref)
@@ -146,12 +149,12 @@ def fit_film_edge(eps_short=0.05, eps_long=0.95, width=1.6,
 
 
 class TabulatedEmissivity:
-    """eps(T) по таблице с линейной интерполяцией.
+    """eps(T) from a table with linear interpolation.
 
-    Правая часть тепловой ОДУ вызывает eps(T) сотни тысяч раз, а честное
-    планковское взвешивание стоит интеграла на 40 000 точек. Поэтому кривая
-    табулируется один раз на сетке 300-3500 K (шаг 25 K; eps(T) гладкая,
-    ошибка интерполяции < 3e-5 по всему диапазону).
+    The thermal ODE right-hand side calls eps(T) hundreds of thousands of
+    times, while an honest Planck weighting costs an integral over 40 000
+    points. So the curve is tabulated once on a 300-3500 K grid (25 K step;
+    eps(T) is smooth, interpolation error < 3e-5 over the whole range).
     """
 
     def __init__(self, func_T, T_lo=300.0, T_hi=3500.0, dT=25.0, label=""):
@@ -167,12 +170,13 @@ _OXIDE_CACHE: dict = {}
 
 
 def oxide_film_emissivity(eps_short=0.05, eps_long=0.95, width=1.6):
-    """Сценарий "плёнка оптически активна": eps(T) одной спектральной кривой.
+    """"Optically active film" scenario: eps(T) of one spectral curve.
 
-    Кривая пришпилена к справочной точке alpha-Al2O3 при 1800 K; вторая
-    справочная точка (300 K) предсказывается, см. analysis_step5b.E.
-    Выше 2345 K (плавление Al2O3) это экстраполяция, но при кипении
-    Al на местном давлении (~2000 K) плёнка ещё твёрдая.
+    The curve is pinned to the alpha-Al2O3 reference point at 1800 K; the
+    second reference point (300 K) is predicted, see analysis_step5b part E.
+    Above 2345 K (melting of Al2O3) this is an extrapolation, but at the
+    boiling point of Al at the local pressure (~2000 K) the film is still
+    solid.
     """
     key = (eps_short, eps_long, width)
     if key not in _OXIDE_CACHE:
@@ -184,18 +188,18 @@ def oxide_film_emissivity(eps_short=0.05, eps_long=0.95, width=1.6):
 
 
 # ---------------------------------------------------------------------------
-# Сценарий "голый расплав": металл без оптически активной плёнки
+# "Bare melt" scenario: metal without an optically active film
 # ---------------------------------------------------------------------------
 
 def aluminium_resistivity(T, T_melt: float = 933.5):
-    """Удельное электросопротивление чистого Al, Ом*м.
+    """Electrical resistivity of pure Al, Ohm*m.
 
-    Твёрдая фаза: 2.65 мкОм*см при 293 K -> ~10.9 при плавлении, линейно.
-    Жидкость: ~24.2 мкОм*см при плавлении, наклон ~0.0145 мкОм*см/К.
-    Порядок величин — рекомендованные данные для Al (Desai et al., J. Phys.
-    Chem. Ref. Data 13, 1131, 1984); выше ~1500 K жидкая ветвь —
-    экстраполяция. Сплав 6061 в твёрдой фазе имеет сопротивление выше
-    (~4 мкОм*см при 293 K), то есть для него eps здесь занижена.
+    Solid: 2.65 uOhm*cm at 293 K -> ~10.9 at melting, linear.
+    Liquid: ~24.2 uOhm*cm at melting, slope ~0.0145 uOhm*cm/K.
+    Orders of magnitude from recommended data for Al (Desai et al., J. Phys.
+    Chem. Ref. Data 13, 1131, 1984); above ~1500 K the liquid branch is an
+    extrapolation. Solid 6061 has a higher resistivity (~4 uOhm*cm at 293 K),
+    so for it eps here is underestimated.
     """
     T = np.asarray(T, dtype=float)
     solid = 2.65 + (10.9 - 2.65) * (T - 293.0) / (T_melt - 293.0)
@@ -204,27 +208,27 @@ def aluminium_resistivity(T, T_melt: float = 933.5):
 
 
 def parker_abbott_emissivity(rho_e_ohm_m, T):
-    """Полная полусферическая eps металла по сопротивлению (Parker & Abbott,
-    NASA SP-55, 1965), обобщение соотношения Хагена-Рубенса:
+    """Total hemispherical eps of a metal from its resistivity (Parker &
+    Abbott, NASA SP-55, 1965), a generalization of the Hagen-Rubens relation:
 
         eps = 0.766 x^0.5 - (0.309 - 0.0889 ln x) x - 0.0175 x^1.5,
-        x = rho_e[Ом*см] * T[K]
+        x = rho_e[Ohm*cm] * T[K]
 
-    Проверка на справочных данных: для полированного твёрдого Al при
-    600-900 K даёт 0.045-0.068 (справочник: 0.04-0.07), см. verify_step5.
+    Checked against reference data: for polished solid Al at 600-900 K it
+    gives 0.045-0.068 (handbook: 0.04-0.07), see verify_step5.
     """
     x = np.asarray(rho_e_ohm_m, dtype=float) * 100.0 * np.asarray(T, dtype=float)
     return 0.766 * np.sqrt(x) - (0.309 - 0.0889 * np.log(x)) * x - 0.0175 * x ** 1.5
 
 
 def bare_aluminium_emissivity(T):
-    """Сценарий "плёнки нет": eps(T) голого Al по сопротивлению.
+    """"No film" scenario: eps(T) of bare Al from its resistivity.
 
-    ОЦЕНКА, а не измерение: прямых данных по полной eps жидкого Al выше
-    ~1500 K найти не удалось. Даёт ~0.10 у плавления и ~0.18 при 2000 K.
-    Справочное 0.05 — это полированный ТВЁРДЫЙ Al при 300-900 K; у жидкого
-    металла сопротивление в 2.4-5 раз выше, чем у твёрдого при 900 K, и eps
-    растёт примерно как корень из него.
+    An ESTIMATE, not a measurement: no direct data on the total eps of liquid
+    Al above ~1500 K were found. Gives ~0.10 at melting and ~0.17 at 2000 K.
+    The handbook value 0.05 is polished SOLID Al at 300-900 K; the liquid
+    metal's resistivity is 2.4-5 times that of the solid at 900 K, and eps
+    grows roughly as its square root.
     """
     T = np.asarray(T, dtype=float)
     return parker_abbott_emissivity(aluminium_resistivity(T), T)
@@ -234,18 +238,17 @@ def synthetic_oxide_spectrum(wavelength_m, thickness_m: float,
                              eps_metal: float = 0.05,
                              eps_oxide: float = 0.60,
                              lam_transition: float = 3.0e-6):
-    """ЗАГЛУШКА до появления реальных данных. Не выдавать за измерение.
+    """PLACEHOLDER until real data exist. Not to be presented as a measurement.
 
-    Простейшая модель "плёнка на металле": плёнка непрозрачна там, где её
-    оптическая толщина велика, то есть на коротких волнах относительно
-    lam_transition ~ толщины; на длинных волнах просвечивает металл.
+    Simplest "film on metal" model: the film is opaque where its optical
+    thickness is large, i.e. at short wavelengths relative to
+    lam_transition ~ thickness; at long wavelengths the metal shows through.
 
-        eps(lam) = eps_мет + (eps_окс - eps_мет) / (1 + (lam/(delta*k))^2)
+        eps(lam) = eps_metal + (eps_oxide - eps_metal) / (1 + (lam/(delta*k))^2)
 
-    Нужна ровно для одного: проверить, что цепочка
-    "спектр -> планковское взвешивание -> eps(T) -> модель" работает
-    целиком, ДО того как появятся образцы. Численные значения смысла
-    не имеют.
+    Needed for exactly one thing: checking that the chain
+    "spectrum -> Planck weighting -> eps(T) -> model" works end to end
+    BEFORE samples exist. The numbers themselves mean nothing.
     """
     lam = np.asarray(wavelength_m, dtype=float)
     lam_c = max(thickness_m, 1e-9) * (lam_transition / 1e-6) * 1e6 * 1e-6

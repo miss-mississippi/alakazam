@@ -1,11 +1,13 @@
-"""Проверки шага 1. Запуск: python verify_step1.py  (или pytest)
+"""Step 1 checks. Run: python verify_step1.py  (or pytest)
 
-1. Кеплеров тест: без сопротивления удельная энергия и момент импульса
-   сохраняются. Прямой тест правой части ОДУ.
-2. Сходимость: ужесточаем rtol и max_step, ответ не должен двигаться.
-3. Аллен-Эггерс: с gamma0 не сходится, с фактическим gamma в пике — сходится
-   по высоте. Значит расходится допущение gamma = const, а не уравнения.
-4. Чувствительность к beta: h* ~ H ln(beta), удвоение beta опускает пик на H ln2.
+1. Kepler test: without drag the specific energy and angular momentum are
+   conserved. A direct test of the ODE right-hand side.
+2. Convergence: tighten rtol and max_step; the answer must not move.
+3. Allen-Eggers: with gamma0 it does not match, with the actual gamma at the
+   peak it matches in altitude. So it is the gamma = const assumption that
+   fails, not the equations.
+4. Sensitivity to beta: h* ~ H ln(beta), doubling beta lowers the peak by
+   H ln2.
 """
 
 from __future__ import annotations
@@ -16,14 +18,14 @@ from reentry import EntryState, ExponentialAtmosphere, Vehicle, allen_eggers, in
 from reentry.constants import G0, H_SCALE_FIT, MU_EARTH, R_EARTH
 from reentry.results import Recorder
 
-# Шаги 1-2 определены для невращающейся Земли; integrate() по умолчанию
-# вращение включает, поэтому здесь оно выключено явно.
+# Steps 1-2 are defined for a non-rotating Earth; integrate() turns rotation
+# on by default, so it is switched off explicitly here.
 NO_ROT = dict(earth_rotation=False)
 R = Recorder("verify_step1")
 
 
 class Vacuum:
-    """Атмосфера с нулевой плотностью — для кеплерова теста."""
+    """Atmosphere with zero density, for the Kepler test."""
     name = "vacuum"
     rho0 = 1.225
 
@@ -35,32 +37,32 @@ class Vacuum:
 
 
 def test_kepler():
-    print("1. КЕПЛЕРОВ ТЕСТ (сопротивление выключено)")
+    print("1. KEPLER TEST (drag switched off)")
     veh = Vehicle(mass=175.0, area=1.0, Cd=1.0)
     entry = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5)
     traj = integrate(veh, entry, Vacuum(), h_stop=30e3, v_stop=0.0, rtol=1e-11,
                      **NO_ROT)
 
     r = R_EARTH + traj.h
-    energy = 0.5 * traj.V ** 2 - MU_EARTH / r          # удельная энергия, Дж/кг
-    angmom = traj.V * r * np.cos(traj.gamma)            # удельный момент, м^2/с
+    energy = 0.5 * traj.V ** 2 - MU_EARTH / r          # specific energy, J/kg
+    angmom = traj.V * r * np.cos(traj.gamma)            # specific angular momentum, m^2/s
 
     de = np.ptp(energy) / abs(energy[0])
     dl = np.ptp(angmom) / abs(angmom[0])
-    print(f"   дрейф удельной энергии       {de:.3e}  (относительный)")
-    print(f"   дрейф момента импульса       {dl:.3e}\n")
+    print(f"   specific energy drift        {de:.3e}  (relative)")
+    print(f"   angular momentum drift       {dl:.3e}\n")
     R["kepler.energy_drift"] = de
     R["kepler.angmom_drift"] = dl
-    assert de < 1e-9 and dl < 1e-9, f"дрейф {de:.1e}, {dl:.1e}"
+    assert de < 1e-9 and dl < 1e-9, f"drift {de:.1e}, {dl:.1e}"
 
 
 def test_convergence():
-    print("2. СХОДИМОСТЬ ПО ШАГУ И ДОПУСКУ")
+    print("2. CONVERGENCE IN STEP AND TOLERANCE")
     veh = Vehicle(mass=175.0, area=1.0, Cd=1.0)
     entry = EntryState(gamma_deg=-1.5)
     atm = ExponentialAtmosphere()
-    print(f"   {'rtol':>8}{'max_step':>10}{'t_кон, с':>12}"
-          f"{'h пика, км':>13}{'макс g':>10}")
+    print(f"   {'rtol':>8}{'max_step':>10}{'t_end, s':>12}"
+          f"{'peak h, km':>13}{'max g':>10}")
     hs, ts = [], []
     for rtol, ms in ((1e-6, 5.0), (1e-8, 2.0), (1e-10, 0.5), (1e-12, 0.25)):
         tr = integrate(veh, entry, atm, rtol=rtol, max_step=ms, **NO_ROT)
@@ -71,12 +73,12 @@ def test_convergence():
     print()
     R["convergence.h_peak_km"] = hs[-1] / 1e3
     R["convergence.h_spread_m"] = max(hs) - min(hs)
-    assert max(hs) - min(hs) < 1.0, f"высота пика гуляет на {max(hs)-min(hs):.2f} м"
-    assert max(ts) - min(ts) < 0.05, f"время гуляет на {max(ts)-min(ts):.3f} с"
+    assert max(hs) - min(hs) < 1.0, f"peak altitude moves by {max(hs)-min(hs):.2f} m"
+    assert max(ts) - min(ts) < 0.05, f"time moves by {max(ts)-min(ts):.3f} s"
 
 
 def test_allen_eggers():
-    print("3. АЛЛЕН-ЭГГЕРС: почему прямая сверка не сходится")
+    print("3. ALLEN-EGGERS: why the direct comparison does not match")
     veh = Vehicle(mass=175.0, area=1.0, Cd=1.0)
     entry = EntryState(gamma_deg=-1.5)
     atm = ExponentialAtmosphere()
@@ -89,14 +91,14 @@ def test_allen_eggers():
     ae0 = allen_eggers(veh, entry)
     ae1 = allen_eggers(veh, EntryState(gamma_deg=gamma_peak_deg))
 
-    print(f"   gamma в начале                 {entry.gamma_deg:+7.2f} град")
-    print(f"   gamma в точке пика торможения  {gamma_peak_deg:+7.2f} град\n")
-    print(f"   {'величина':<24}{'численно':>11}{'А-Э(g0)':>11}{'А-Э(g пика)':>13}")
-    print(f"   {'макс. торможение, g':<24}{a_num/G0:>11.2f}"
+    print(f"   gamma at the start             {entry.gamma_deg:+7.2f} deg")
+    print(f"   gamma at peak deceleration     {gamma_peak_deg:+7.2f} deg\n")
+    print(f"   {'quantity':<24}{'numerical':>11}{'A-E(g0)':>11}{'A-E(g peak)':>13}")
+    print(f"   {'max deceleration, g':<24}{a_num/G0:>11.2f}"
           f"{ae0['a_max']/G0:>11.2f}{ae1['a_max']/G0:>13.2f}")
-    print(f"   {'высота пика, км':<24}{h_num/1e3:>11.2f}"
+    print(f"   {'peak altitude, km':<24}{h_num/1e3:>11.2f}"
           f"{ae0['h_at_peak']/1e3:>11.2f}{ae1['h_at_peak']/1e3:>13.2f}")
-    print(f"   {'скорость в пике, м/с':<24}{v_num:>11.0f}"
+    print(f"   {'speed at peak, m/s':<24}{v_num:>11.0f}"
           f"{ae0['V_at_peak']:>11.0f}{'--':>13}\n")
     R["ae.gamma_peak_deg"] = gamma_peak_deg
     R["ae.num.amax_g"] = a_num / G0
@@ -109,23 +111,23 @@ def test_allen_eggers():
     R["ae.gpeak.h_km"] = ae1["h_at_peak"] / 1e3
     R["ae.amax_dev_pct"] = 100 * (a_num / ae0["a_max"] - 1)
     dh = abs(h_num - ae1["h_at_peak"])
-    assert dh < 0.5e3, f"с фактическим gamma высота расходится на {dh/1e3:.2f} км"
-    assert abs(h_num - ae0["h_at_peak"]) > 5e3, "с gamma0 ожидалось расхождение"
+    assert dh < 0.5e3, f"with the actual gamma the altitude is off by {dh/1e3:.2f} km"
+    assert abs(h_num - ae0["h_at_peak"]) > 5e3, "a mismatch was expected with gamma0"
 
 
 def test_beta_sensitivity():
-    print("4. ЧУВСТВИТЕЛЬНОСТЬ К БАЛЛИСТИЧЕСКОМУ КОЭФФИЦИЕНТУ")
+    print("4. SENSITIVITY TO THE BALLISTIC COEFFICIENT")
     shift = H_SCALE_FIT * np.log(2) / 1e3
-    print(f"   предсказание: h* ~ H*ln(beta), удвоение beta опускает пик на {shift:.1f} км")
+    print(f"   prediction: h* ~ H*ln(beta), doubling beta lowers the peak by {shift:.1f} km")
     entry = EntryState(gamma_deg=-1.5)
     atm = ExponentialAtmosphere()
-    print(f"   {'beta, кг/м^2':>14}{'h пика, км':>13}{'макс g':>10}")
+    print(f"   {'beta, kg/m^2':>14}{'peak h, km':>13}{'max g':>10}")
     hs, gs = [], []
     for k, area in enumerate((4.0, 2.0, 1.0, 0.5)):
         veh = Vehicle(mass=175.0, area=area, Cd=1.0)
         tr = integrate(veh, entry, atm, **NO_ROT)
         a, hp, _ = tr.peak_decel()
-        delta = "" if not hs else f"   ({(hp - hs[-1])/1e3:+.1f} км)"
+        delta = "" if not hs else f"   ({(hp - hs[-1])/1e3:+.1f} km)"
         print(f"   {veh.ballistic_coefficient:>14.1f}{hp/1e3:>13.2f}{a/G0:>10.2f}{delta}")
         R[f"beta.{k}.beta"] = veh.ballistic_coefficient
         R[f"beta.{k}.h_km"] = hp / 1e3
@@ -135,8 +137,8 @@ def test_beta_sensitivity():
     steps = -np.diff(hs) / 1e3
     for k, s in enumerate(steps):
         R[f"beta_step.{k}"] = -s
-    assert np.all(np.abs(steps - shift) < 0.3), f"шаги {steps} против {shift:.2f}"
-    assert max(gs) / min(gs) - 1 < 0.10, "перегрузка не должна зависеть от beta"
+    assert np.all(np.abs(steps - shift) < 0.3), f"steps {steps} vs {shift:.2f}"
+    assert max(gs) / min(gs) - 1 < 0.10, "peak g must not depend on beta"
 
 
 if __name__ == "__main__":

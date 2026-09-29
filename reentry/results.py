@@ -1,15 +1,15 @@
-"""Машиночитаемые результаты.
+"""Machine-readable results.
 
-Каждый скрипт шага пишет ключевые числа в results/<имя>.json. Документы
-(README.md, REPORT_full.md) ссылаются на них невидимыми метками вида
+Every step script writes its key numbers to results/<name>.json. The
+documents (README.md, docs/REPORT.md) refer to them with invisible tags like
 
     8.5<!--=step5.scenarios.film.total:.1f-->
 
-и check_docs.py сверяет число перед меткой с результатом. Так цифры в тексте
-не расходятся с кодом молча.
+and check_docs.py compares the number before each tag with the result, so
+numbers in the text cannot silently drift away from the code.
 
-Ключ — путь через точку: первый сегмент — имя файла в results/, дальше —
-ключи словаря; числовой сегмент — индекс списка.
+A key is a dotted path: the first segment is the file name in results/, the
+rest are dictionary keys; a numeric segment indexes a list.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
 
 
 def _clean(x):
-    """numpy -> python, NaN -> None, кортежи -> списки."""
+    """numpy -> python, NaN -> None, tuples -> lists."""
     if isinstance(x, dict):
         return {str(k): _clean(v) for k, v in x.items()}
     if isinstance(x, (list, tuple, np.ndarray)):
@@ -41,7 +41,7 @@ def _clean(x):
 
 
 class Recorder:
-    """Собирает числа по ходу скрипта и сохраняет их одним файлом.
+    """Collects numbers during a script run and saves them as one file.
 
         R = Recorder("step5")
         R["scenarios.film.total"] = 8.52
@@ -76,14 +76,14 @@ def load(name: str) -> dict:
 
 
 def lookup(key: str, cache: dict | None = None):
-    """Значение по ключу 'файл.путь.к.значению'. KeyError, если его нет."""
+    """Value for the key "file.path.to.value". KeyError if it is missing."""
     parts = key.split(".")
     if cache is None:
         cache = {}
     if parts[0] not in cache:
         path = RESULTS_DIR / f"{parts[0]}.json"
         if not path.exists():
-            raise KeyError(f"нет файла results/{parts[0]}.json")
+            raise KeyError(f"no file results/{parts[0]}.json")
         cache[parts[0]] = json.loads(path.read_text())
     node = cache[parts[0]]
     for p in parts[1:]:

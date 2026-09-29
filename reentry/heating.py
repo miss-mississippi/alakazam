@@ -1,116 +1,112 @@
-"""Аэродинамический нагрев в точке торможения.
+"""Stagnation-point aerodynamic heating.
 
-РАЗМЕРНОСТЬ КОНСТАНТЫ САТТОНА-ГРЕЙВСА — главная ловушка этого модуля.
+UNITS OF THE SUTTON-GRAVES CONSTANT are the main trap of this module.
 
-NASA TFAWS Aerothermodynamics Course приводит k = 1.7415e-4 для Земли и
-подписывает результат как Вт/см^2. Прямая подстановка это опровергает:
-для Stardust (Rn = 0.23 м, V = 12.6 км/с, rho ~ 3e-4 кг/м^3, измеренный
-пик ~1200 Вт/см^2) формула со всеми входами в СИ даёт 1.26e7. Это
-1260 Вт/см^2 только если считать выход в Вт/м^2. В Вт/см^2 получилось бы
-1.26e7 Вт/см^2 — на четыре порядка мимо.
+The NASA TFAWS Aerothermodynamics Course gives k = 1.7415e-4 for Earth and
+labels the result W/cm^2. Direct substitution contradicts this: for Stardust
+(Rn = 0.23 m, V = 12.6 km/s, rho ~ 3e-4 kg/m^3, computed peak ~1200 W/cm^2)
+the formula with all inputs in SI gives 1.26e7. That is 1260 W/cm^2 only if
+the output is read as W/m^2. In W/cm^2 it would be 1.26e7 W/cm^2, off by four
+orders of magnitude.
 
-Вывод: k = 1.7415e-4 при входах в СИ (rho кг/м^3, Rn м, V м/с) даёт
-q в ВТ/М^2. Проверяется в verify_step3.test_sutton_graves_units().
+Conclusion: k = 1.7415e-4 with SI inputs (rho kg/m^3, Rn m, V m/s) gives
+q in W/M^2. Checked in verify_step3.test_sutton_graves_units().
 
-Существует вариант константы 1.83e-4 (встречается в открытых реализациях),
-это примерно на 5% выше. Держим как оценку неопределённости самой корреляции.
+A variant of the constant, 1.83e-4, appears in open implementations; it is
+about 5% higher and is kept as an estimate of the correlation's uncertainty.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-# Саттон-Грейвс для воздуха/Земли.
-# Источник: Sutton K., Graves R.A., NASA TR R-376 (1971); значение
-# воспроизведено в NASA TFAWS Aerothermodynamics Course.
-# Входы в СИ -> выход Вт/м^2. Неопределённость самой корреляции ~10-20%,
-# плюс ~5% разброс между вариантами константы (1.7415e-4 против 1.83e-4).
+# Sutton-Graves for air / Earth.
+# Source: Sutton K., Graves R.A., NASA TR R-376 (1971); value as reproduced
+# in the NASA TFAWS Aerothermodynamics Course.
+# SI inputs -> W/m^2 output. Correlation uncertainty ~10-20%, plus ~5% spread
+# between variants of the constant (1.7415e-4 vs 1.83e-4).
 K_SUTTON_GRAVES = 1.7415e-4
 
-# Скорость нормировки для Detra-Kemp-Riddell — круговая скорость у поверхности.
-V_REF_DKR = 7925.0          # м/с
-RHO_REF_DKR = 1.225         # кг/м^3
-EXP_DKR = 3.15              # показатель степени по скорости
+# Normalization point for Detra-Kemp-Riddell: circular speed at the surface.
+V_REF_DKR = 7925.0          # m/s
+RHO_REF_DKR = 1.225         # kg/m^3
+EXP_DKR = 3.15              # velocity exponent
 
 
 def sutton_graves(rho, V, nose_radius: float, k: float = K_SUTTON_GRAVES):
-    """Тепловой поток в точке торможения, Вт/м^2.
+    """Stagnation-point heat flux, W/m^2.
 
         q = k * sqrt(rho / Rn) * V^3
 
-    rho : кг/м^3, V : м/с, nose_radius : м.
+    rho: kg/m^3, V: m/s, nose_radius: m.
 
-    Что корреляция в себе несёт:
-      - Она для ТОЧКИ ТОРМОЖЕНИЯ сферического затупления. По поверхности
-        поток разносится угловым распределением cos(theta)
-        (local_flux_fraction), а в интегральных оценках — форм-фактором
-        SHAPE_FACTOR_TUMBLING.
-      - Только КОНВЕКТИВНЫЙ поток. Радиационный нагрев ударного слоя
-        при V < 8 км/с пренебрежим (он включается около 10 км/с), так что
-        для входа с орбиты это законно.
-      - Холодная стенка. Поправка на горячую стенку — отдельный множитель
-        hot_wall_factor(), здесь её нет.
+    What the correlation carries:
+      - It is for the STAGNATION POINT of a spherical nose. Over the surface
+        the flux is distributed with cos(theta) (local_flux_fraction), and in
+        integral estimates with the shape factor SHAPE_FACTOR_TUMBLING.
+      - CONVECTIVE flux only. Shock-layer radiative heating is negligible
+        below 8 km/s (it becomes important around 10 km/s), so this is valid
+        for entry from orbit.
+      - Cold wall. The hot-wall correction is a separate factor,
+        hot_wall_factor(), not applied here.
     """
     return k * np.sqrt(np.asarray(rho) / nose_radius) * np.asarray(V) ** 3
 
 
 def detra_kemp_riddell_shape(rho, V, nose_radius: float, q_ref_pair=None):
-    """DKR как ФОРМА, а не как абсолютная величина.
+    """DKR as a SHAPE, not as an absolute value.
 
         q ~ Rn^-0.5 * rho^0.5 * V^3.15
 
-    ПОЧЕМУ ТОЛЬКО ФОРМА. Абсолютную константу DKR не удалось взять из
-    надёжного первоисточника: в открытых реализациях встречаются разные
-    нормировки и показатели (3.15 против 3.25), а исходная работа
-    Detra-Kemp-Riddell (1957) в свободном доступе не нашлась. Врать
-    константой ради красивой второй кривой смысла нет.
+    WHY SHAPE ONLY. The absolute DKR constant could not be taken from a
+    reliable primary source: open implementations use different
+    normalizations and exponents (3.15 vs 3.25), and the original
+    Detra-Kemp-Riddell (1957) paper was not freely available. Inventing a
+    constant for a nicer second curve makes no sense.
 
-    Зато содержательная часть сверки от константы не зависит. Вопрос,
-    ради которого DKR вообще нужен, — насколько результат чувствителен
-    к ПОКАЗАТЕЛЮ СТЕПЕНИ по скорости, 3.0 против 3.15. Поэтому нормируем
-    DKR на Саттона-Грейвса в одной опорной точке (V_REF_DKR, RHO_REF_DKR)
-    и сравниваем только форму: где смещается пик и как меняется
-    интегральный тепловой поток.
-
-    Это честнее, чем подставить непроверенное число, и отвечает ровно на
-    тот вопрос, который важен для высотного распределения массы.
+    The substantive part of the comparison does not depend on the constant.
+    The question DKR answers is how sensitive the result is to the VELOCITY
+    EXPONENT, 3.0 vs 3.15. So DKR is normalized to Sutton-Graves at one
+    reference point (V_REF_DKR, RHO_REF_DKR) and only the shape is compared:
+    where the peak moves and how the integrated heat load changes.
     """
     rho = np.asarray(rho)
     V = np.asarray(V)
-    # Нормировка: в опорной точке совпадает с Саттоном-Грейвсом
+    # Normalization: matches Sutton-Graves at the reference point
     q_ref = sutton_graves(RHO_REF_DKR, V_REF_DKR, nose_radius)
     return q_ref * np.sqrt(rho / RHO_REF_DKR) * (V / V_REF_DKR) ** EXP_DKR
 
 
-# --- Геометрия и переход от потока в точке торможения к полной мощности -----
+# --- Geometry: from stagnation-point flux to total power ------------------
 
-# Средний поток по омываемой поверхности как доля от потока в точке торможения.
-# Стандартный обход в инструментах демиза для тела в случайной ориентации:
-# 0.25-0.3. Берём середину. Неопределённость +-10% относительная.
+# Mean flux over the wetted surface as a fraction of the stagnation flux.
+# The standard shortcut in demise tools for a randomly oriented body is
+# 0.25-0.3. We take the middle. Relative uncertainty +-10%.
 SHAPE_FACTOR_TUMBLING = 0.27
 
-# Полная энтальпия воздуха при 2500-3000 K с учётом диссоциации.
-# Замороженная cp воздуха растёт от 1005 Дж/(кг*К) при 300 K до ~1300 при 3000 K.
-CP_AIR_HOT = 1300.0   # Дж/(кг*К), неопределённость ~15%
+# Air enthalpy at 2500-3000 K including dissociation. The frozen c_p of air
+# rises from 1005 J/(kg*K) at 300 K to ~1300 at 3000 K.
+CP_AIR_HOT = 1300.0   # J/(kg*K), uncertainty ~15%
 
 
 def hot_wall_factor(V, T_wall: float, cp_air: float = CP_AIR_HOT):
-    """Поправка на горячую стенку: q_hot = q_cold * (1 - h_w/h_0).
+    """Hot-wall correction: q_hot = q_cold * (1 - h_w/h_0).
 
-    Саттон-Грейвс даёт ХОЛОДНОСТЕНОЧНЫЙ поток. Реальная стенка горячая,
-    и разность энтальпий, которая гонит тепло в тело, меньше.
+    Sutton-Graves gives a COLD-WALL flux. A real wall is hot, and the
+    enthalpy difference that drives heat into the body is smaller.
 
-        h_0 = V^2/2 + h_воздуха   (полная энтальпия торможения)
-        h_w = cp_воздуха * T_стенки
+        h_0 = V^2/2 + h_air   (total stagnation enthalpy)
+        h_w = cp_air * T_wall
 
-    При V = 7500 м/с: h_0 ~ 2.8e7 Дж/кг. При T ~ 2050 K (кипение Al на
-    давлении торможения ~1 кПа): h_w ~ 2.7e6, множитель ~0.90, минус 10%.
-    При 2740 K (кипение при 1 атм) было бы минус 13%.
+    At V = 7500 m/s: h_0 ~ 2.8e7 J/kg. At T ~ 2050 K (Al boiling at a
+    stagnation pressure of ~1 kPa): h_w ~ 2.7e6, factor ~0.90, minus 10%.
+    At 2740 K (boiling at 1 atm) it would be minus 13%.
 
-    Считаем по энтальпии ВОЗДУХА у стенки, а не по энтальпии металла:
-    поток гонит разность энтальпий газа, а не запас тепла в материале.
-    Оценка по металлу (cp*dT для Al ~ 2.5e6) даёт -9%, то есть тот же
-    порядок; разница между двумя маршрутами и есть неопределённость поправки.
+    The enthalpy is that of the AIR at the wall, not of the metal: the flux
+    is driven by the gas enthalpy difference, not by the heat stored in the
+    material. An estimate via the metal (cp*dT for Al ~ 2.5e6) gives -9%,
+    the same order; the difference between the two routes is the
+    uncertainty of the correction.
     """
     V = np.asarray(V, dtype=float)
     h_0 = 0.5 * V ** 2
@@ -118,139 +114,142 @@ def hot_wall_factor(V, T_wall: float, cp_air: float = CP_AIR_HOT):
     return np.clip(1.0 - h_w / h_0, 0.0, 1.0)
 
 
-# Давление торможения за прямым скачком при M -> бесконечность (формула
-# Рэлея для трубки Пито, gamma = 1.4): p0 = 0.92 * rho * V^2.
+# Stagnation pressure behind a normal shock at M -> infinity (Rayleigh pitot
+# formula, gamma = 1.4): p0 = 0.92 * rho * V^2.
 PITOT_FACTOR = 0.92
 
 
 def stagnation_pressure(rho, V):
-    """Давление в точке торможения, Па. От него зависит температура
-    кипения Al на поверхности (ablation.Aluminium.T_boil_at)."""
+    """Stagnation-point pressure, Pa. It sets the boiling temperature of Al
+    at the surface (ablation.Aluminium.T_boil_at)."""
     return PITOT_FACTOR * np.asarray(rho) * np.asarray(V) ** 2
 
 
 def blowing_factor(h_0, H_eff: float, eta: float = 0.3):
-    """Блокировка потока вдувом продуктов абляции — В ЗАМКНУТОМ ВИДЕ.
+    """Flux blockage by injected ablation products, IN CLOSED FORM.
 
-    Испаряющийся материал уходит в пограничный слой и загораживает часть
-    потока (транспирационное охлаждение). Классическая линейная поправка:
+    Vaporizing material enters the boundary layer and blocks part of the
+    flux (transpiration cooling). The classic linear correction:
 
         q_net = q_hw - eta * mdot'' * h_0
 
-    А скорость уноса сама пропорциональна потоку:
+    and the ablation rate is itself proportional to the flux:
 
         mdot'' = q_net / H_eff
 
-    Подставляем одно в другое:
+    Substituting one into the other:
 
         q_net = q_hw - eta * (q_net/H_eff) * h_0
         q_net * (1 + eta*h_0/H_eff) = q_hw
         q_net = q_hw / (1 + eta*h_0/H_eff)
 
-    ВАЖНО ДЛЯ ТЕПЛОВОЙ МОДЕЛИ: нелинейность замыкается аналитически.
-    И закон абляции, и блокировка линейны по mdot'', поэтому неявный
-    решатель на каждом шаге не нужен — достаточно поделить на множитель.
-    Функция возвращает 1/(1 + eta*h_0/H_eff).
+    IMPORTANT FOR THE THERMAL MODEL: the nonlinearity closes analytically.
+    Both the ablation law and the blockage are linear in mdot'', so no
+    implicit solver is needed at each step; dividing by the factor suffices.
+    Returns 1/(1 + eta*h_0/H_eff).
 
-    КАКОЙ eta. В ламинарном слое вдув блокирует поток СИЛЬНЕЕ, чем в
-    турбулентном: турбулентное перемешивание гасит эффект (эксперименты по
-    транспирационному охлаждению в гиперзвуке, AIAA J. 10.2514/1.J053053).
-    На 70-80 км слой ламинарный.
-    Конкретное значение eta не сверено с первоисточником, поэтому вдув —
-    ОСЬ ЧУВСТВИТЕЛЬНОСТИ (eta 0.3-0.6), а не часть базового расчёта.
-    При eta = 0.3, h_0 = 2.8e7 и H_eff ~ 1.2e7 множитель ~0.59.
+    WHICH eta. In a laminar layer blowing blocks the flux MORE than in a
+    turbulent one: turbulent mixing weakens the effect (hypersonic
+    transpiration-cooling experiments, AIAA J. 10.2514/1.J053053). At
+    70-80 km the layer is laminar. The specific eta value was not verified
+    against a primary source, so blowing is a SENSITIVITY AXIS (eta 0.3-0.6),
+    not part of the baseline. With eta = 0.3, h_0 = 2.8e7 and H_eff ~ 1.2e7
+    the factor is ~0.59.
 
-    В поэлементной модели (ablation.surface_thermal_model, blowing_eta)
-    блокируется только избыток потока в КИПЯЩИХ поясах: поток вдувается
-    там, где идёт испарение, и нигде больше.
+    In the per-band model (ablation.surface_thermal_model, blowing_eta) only
+    the excess flux in BOILING bands is blocked: vapour is injected where
+    evaporation happens and nowhere else.
     """
     return 1.0 / (1.0 + eta * np.asarray(h_0, dtype=float) / H_eff)
 
 
 def absorbed_power(q_stag, wetted_area: float,
                    shape_factor: float = SHAPE_FACTOR_TUMBLING):
-    """Полная тепловая мощность, поглощаемая телом, Вт.
+    """Total thermal power absorbed by the body, W.
 
-    ЭТО, А НЕ q_stag, ОПРЕДЕЛЯЕТ АБЛЯЦИОННУЮ МАССУ.
+    THIS, NOT q_stag, DETERMINES THE ABLATED MASS.
 
-        P = shape_factor * q_stag * A_омыв
+        P = shape_factor * q_stag * A_wet
 
-    Почему знак по Rn переворачивается. Для геометрически подобного тела:
+    Why the sign with respect to Rn flips. For a geometrically similar body:
 
-        q_stag     ~ Rn^(-1/2)      (корреляция)
-        A_омыв     ~ Rn^2           (геометрия)
-        P          ~ Rn^(+3/2)      <- РАСТЁТ с размером
+        q_stag     ~ Rn^(-1/2)      (correlation)
+        A_wet      ~ Rn^2           (geometry)
+        P          ~ Rn^(+3/2)      <- GROWS with size
         m          ~ Rn^3
-        P/m        ~ Rn^(-3/2)      <- удельная нагрузка ПАДАЕТ с размером
+        P/m        ~ Rn^(-3/2)      <- specific load FALLS with size
 
-    То есть по удельному потоку крупное тело греется слабее, а по полной
-    энергии — сильнее. Считать бюджет по массе через q_stag в Вт/м^2 —
-    ошибка знака, а не только величины.
+    By specific flux a large body heats less, by total energy more. Building
+    a mass budget on q_stag in W/m^2 is a sign error, not just a magnitude
+    error.
 
-    Отсюда же вторая причина, почему фрагментация решает исход. Осколки
-    не просто тормозятся выше из-за меньшего beta — они ещё и получают
-    на порядок больше тепла НА КИЛОГРАММ. Два механизма в одну сторону.
+    Hence the second reason fragmentation decides the outcome. Fragments do
+    not only decelerate higher because of a smaller beta; they also receive
+    an order of magnitude more heat PER KILOGRAM. Two mechanisms, same
+    direction.
     """
     return shape_factor * np.asarray(q_stag) * wetted_area
 
 
-# --- Угловое распределение потока и локальный критерий испарения ------------
+# --- Angular flux distribution and a local vaporization criterion --------
 
-SIGMA_SB = 5.670374419e-8   # Вт/(м^2*K^4), постоянная Стефана-Больцмана (CODATA)
+SIGMA_SB = 5.670374419e-8   # W/(m^2*K^4), Stefan-Boltzmann constant (CODATA)
 
 
 def local_flux_fraction(theta):
-    """q(theta)/q_stag по поверхности затупленного тела.
+    """q(theta)/q_stag over the surface of a blunt body.
 
-        f(theta) = cos(theta)   при theta <= 90 град,  0 за миделем
+        f(theta) = cos(theta)   for theta <= 90 deg,  0 behind the shoulder
 
-    ОТКУДА ФОРМА. Ньютоновское распределение давления по сфере даёт
-    p/p_stag = cos^2(theta), а ламинарный поток в окрестности точки
-    торможения идёт как корень из градиента скорости — отсюда линейный
-    по cos(theta) закон (Lees, Jet Propulsion 26, 1956).
+    WHERE THE SHAPE COMES FROM. The Newtonian pressure distribution on a
+    sphere is p/p_stag = cos^2(theta), and laminar heating near the
+    stagnation point scales as the square root of the velocity gradient,
+    hence a law linear in cos(theta) (Lees, Jet Propulsion 26, 1956).
 
-    СВОБОДНЫХ ПАРАМЕТРОВ НЕТ. Это принципиально: альтернатива — делить
-    тело на "носовую" и "остальную" зоны, что вводит новую неизвестную
-    (долю площади носа), которая напрямую умножает испарённую массу.
-    Здесь геометрия зафиксирована.
+    NO FREE PARAMETERS. This matters: the alternative, splitting the body
+    into a "nose" and "the rest", introduces a new unknown (the nose area
+    fraction) that directly multiplies the vaporized mass. Here the geometry
+    is fixed.
 
-    САМОПРОВЕРКА. Среднее по полной поверхности сферы:
+    SELF-CHECK. The mean over the full sphere surface:
 
         <f> = (1/4pi) * int_0^(pi/2) cos(th) * 2pi sin(th) dth = 1/4
 
-    ровно 0.25, то есть внутри стандартной полосы форм-фактора 0.25-0.30,
-    которую используют инструменты демиза. Значит мы не вводим новую
-    физику, а перестаём схлопывать уже имевшуюся: SHAPE_FACTOR_TUMBLING
-    и есть среднее ЭТОГО распределения.
+    exactly 0.25, inside the standard 0.25-0.30 shape-factor band used by
+    demise tools. So no new physics is introduced; physics that was already
+    there stops being averaged away: SHAPE_FACTOR_TUMBLING is the mean of
+    THIS distribution.
 
-    ИДЕАЛИЗАЦИЯ. Для кувыркающегося нерегулярного тела осесимметричного
-    распределения не существует. Но идеализация без свободного параметра
-    лучше произвольного разбиения с параметром.
+    IDEALIZATION. A tumbling irregular body has no axisymmetric flux
+    distribution. But an idealization without a free parameter is better
+    than an arbitrary split with one.
     """
     theta = np.asarray(theta, dtype=float)
     return np.where(theta <= np.pi / 2, np.cos(theta), 0.0)
 
 
 def vaporizing_area_fraction(q_stag, emissivity: float, T_boil: float):
-    """Доля ПОЛНОЙ поверхности, где местный поток превышает то, что
-    излучение способно отвести при температуре кипения.
+    """Fraction of the FULL surface where the local flux exceeds what
+    radiation can remove at the boiling temperature.
 
-    Локальное радиационное равновесие: eps*sigma*T(th)^4 = q_stag*cos(th).
-    Кипение там, где cos(th) > C, где
+    Local radiative equilibrium: eps*sigma*T(th)^4 = q_stag*cos(th).
+    Boiling where cos(th) > C, with
 
-        C = eps*sigma*T_кип^4 / q_stag
+        C = eps*sigma*T_boil^4 / q_stag
 
-    Доля площади полной сферы:
+    Fraction of the full sphere:
 
-        A_доля = (1 - cos(th_c))/2 = (1 - C)/2      при C < 1,  иначе 0
+        A_frac = (1 - cos(th_c))/2 = (1 - C)/2      for C < 1,  else 0
 
-    ПОЧЕМУ ЭТО ВАЖНО. Задача пороговая и с T^4: испарение идёт там, где поток
-    выше среднего, а среднее этого места не видит. Со средней температурой
-    при eps=0.3 и q=85 Вт/см^2 равновесие 1916 K — ниже кипения при 1 атм
-    (2792 K), но рядом с кипением на местном давлении (~1900-2050 K).
+    WHY IT MATTERS. The problem is a threshold one with T^4: evaporation
+    happens where the flux is above average, and the average does not see
+    that place. With a single mean temperature at eps = 0.3 and
+    q = 85 W/cm^2 the equilibrium is 1916 K: below boiling at 1 atm (2792 K)
+    but close to boiling at the local pressure (~1900-2050 K).
 
-    Эта замкнутая форма — для проверки и оценок; в расчёте используется
-    ablation.surface_thermal_model (T_кип по давлению, две стороны пластины).
+    This closed form is for checks and estimates; the model itself uses
+    ablation.surface_thermal_model (pressure-dependent T_boil, two-sided
+    plates).
     """
     q = np.asarray(q_stag, dtype=float)
     C = np.where(q > 0, emissivity * SIGMA_SB * T_boil ** 4 / np.maximum(q, 1e-30),
@@ -260,23 +259,23 @@ def vaporizing_area_fraction(q_stag, emissivity: float, T_boil: float):
 
 def vaporization_rate(q_stag, wetted_area: float, emissivity: float,
                       T_boil: float, L_vapour: float):
-    """Скорость уноса массы испарением, кг/с — В ЗАМКНУТОМ ВИДЕ.
+    """Mass loss rate by vaporization, kg/s, IN CLOSED FORM.
 
-    Избыток потока над тем, что уносит излучение, идёт на испарение:
+    The flux in excess of what radiation removes goes into vaporization:
 
-        q_исп(th) = q_stag*cos(th) - eps*sigma*T_кип^4,   где cos(th) > C
+        q_vap(th) = q_stag*cos(th) - eps*sigma*T_boil^4,   where cos(th) > C
 
-    Интегрируем по поверхности сферы:
+    Integrating over the sphere surface:
 
-        mdot = (A/L_исп) * (1/2) * int_0^(th_c) [q_stag*cos - eps*sig*T^4] sin dth
+        mdot = (A/L_vap) * (1/2) * int_0^(th_c) [q_stag*cos - eps*sig*T^4] sin dth
 
-    Подстановка eps*sigma*T_кип^4 = q_stag*C и интегрирование дают
+    Substituting eps*sigma*T_boil^4 = q_stag*C and integrating gives
 
-        mdot = A * q_stag * (1 - C)^2 / (4 * L_исп)
+        mdot = A * q_stag * (1 - C)^2 / (4 * L_vap)
 
-    Квадрат по (1-C) — не опечатка: у порога испарение включается плавно,
-    потому что одновременно стремятся к нулю и площадь, и избыток потока.
-    Проверяется численным интегрированием в verify_step4.
+    The square in (1-C) is not a typo: near the threshold evaporation turns
+    on smoothly because both the area and the excess flux go to zero.
+    Checked against numerical integration in verify_step4.
     """
     q = np.asarray(q_stag, dtype=float)
     C = emissivity * SIGMA_SB * T_boil ** 4 / np.maximum(q, 1e-30)
