@@ -15,13 +15,21 @@ import matplotlib.pyplot as plt
 from reentry import (EntryState, ExponentialAtmosphere, MSISAtmosphere,
                      Vehicle, integrate)
 from reentry.constants import G0
+from reentry.results import Recorder
+
+# Шаги 1-2 определены для НЕВРАЩАЮЩЕЙСЯ Земли: вращение атмосферы вводится
+# на шаге 3. С тех пор integrate() включает его по умолчанию, поэтому
+# здесь оно выключено явно — иначе цифры шагов 1-2 не воспроизводятся.
+NO_ROT = dict(earth_rotation=False)
+R = Recorder("step2")
+
 
 plt.rcParams.update({
     "figure.dpi": 130, "font.size": 9, "axes.grid": True, "grid.alpha": 0.25,
     "axes.spines.top": False, "axes.spines.right": False,
 })
 
-VEH = Vehicle(mass=175.0, area=1.0, Cd=1.5)     # Cd=1.5 — базовый после ревью
+VEH = Vehicle(mass=175.0, area=1.0, Cd=1.5)     # Cd=1.5 — кувыркающееся тело
 ENTRY = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5)
 
 
@@ -37,9 +45,18 @@ def table_density():
         a = float(m00.density(h * 1e3))
         b = float(m21.density(h * 1e3))
         H = float(m00.scale_height(h * 1e3)) / 1e3
+        R[f"density.h{h}.exp"] = e
+        R[f"density.h{h}.m00"] = a
+        R[f"density.h{h}.m21"] = b
+        R[f"density.h{h}.exp_over_00"] = e / a
+        R[f"density.h{h}.m21_over_00"] = b / a
+        R[f"density.h{h}.H_km"] = H
         print(f"   {h:>7}{e:>12.3e}{a:>12.3e}{b:>12.3e}"
               f"{e/a:>9.2f}{b/a:>9.2f}{H:>12.2f}")
     Hs = m00.scale_height(np.arange(40e3, 121e3, 1e3)) / 1e3
+    R["density.H_min_km"] = Hs.min()
+    R["density.H_max_km"] = Hs.max()
+    R["density.H_spread_pct"] = 100 * (Hs.max() - Hs.min()) / 7.2
     print(f"\n   локальная шкала высот на 40-120 км: {Hs.min():.1f}-{Hs.max():.1f} км")
     print(f"   заглушка использовала одну константу 7.2 км -> "
           f"разброс {100*(Hs.max()-Hs.min())/7.2:.0f}%")
@@ -54,10 +71,16 @@ def table_trajectory(exp, m00, m21):
           f"{'h торм., км':>13}{'макс g':>9}{'h нагрева, км':>15}")
     out = {}
     for label, atm in (("экспонента", exp), ("MSISE-00", m00), ("MSIS 2.1", m21)):
-        tr = integrate(VEH, ENTRY, atm)
+        tr = integrate(VEH, ENTRY, atm, **NO_ROT)
         a, h_a, _ = tr.peak_decel()
         h_q, _, _ = tr.peak_heating()
         out[label] = tr
+        key = {"экспонента": "exp", "MSISE-00": "m00", "MSIS 2.1": "m21"}[label]
+        R[f"traj.{key}.t"] = tr.t[-1]
+        R[f"traj.{key}.range_km"] = tr.s[-1] / 1e3
+        R[f"traj.{key}.h_decel_km"] = h_a / 1e3
+        R[f"traj.{key}.amax_g"] = a / G0
+        R[f"traj.{key}.h_heat_km"] = h_q / 1e3
         print(f"   {label:<14}{tr.t[-1]:>9.0f}{tr.s[-1]/1e3:>12.0f}"
               f"{h_a/1e3:>13.1f}{a/G0:>9.1f}{h_q/1e3:>15.1f}")
     da = (out["MSISE-00"].peak_decel()[1] - out["экспонента"].peak_decel()[1]) / 1e3
@@ -83,7 +106,7 @@ def table_solar():
     res = {}
     for label, kw in cases:
         atm = MSISAtmosphere(version=0, **kw)
-        tr = integrate(VEH, ENTRY, atm)
+        tr = integrate(VEH, ENTRY, atm, **NO_ROT)
         a, h_a, _ = tr.peak_decel()
         h_q, _, _ = tr.peak_heating()
         res[label] = (float(atm.density(120e3)), float(atm.density(70e3)),
@@ -91,6 +114,9 @@ def table_solar():
         print(f"   {label:<22}{res[label][0]:>12.2e}{res[label][1]:>12.2e}"
               f"{tr.t[-1]:>8.0f}{h_a/1e3:>10.1f}{h_q/1e3:>10.1f}")
     lo, hi = res["минимум F10.7=70"], res["максимум F10.7=220"]
+    R["solar.rho120_ratio"] = hi[0] / lo[0]
+    R["solar.rho70_ratio"] = hi[1] / lo[1]
+    R["solar.h_heat_shift_km"] = (hi[4] - lo[4]) / 1e3
     print(f"\n   min->max по F10.7: плотность на 120 км x{hi[0]/lo[0]:.1f}, "
           f"на 70 км x{hi[1]/lo[1]:.2f}")
     print(f"   а высота пика нагрева сдвигается всего на "
@@ -109,8 +135,11 @@ def table_geography():
         ("полярная, сентябрь", dict(lat=-75., date=np.datetime64("2026-09-01T12:00"))),
     ]:
         atm = MSISAtmosphere(version=0, **kw)
-        tr = integrate(VEH, ENTRY, atm)
+        tr = integrate(VEH, ENTRY, atm, **NO_ROT)
         h_q, _, _ = tr.peak_heating()
+        key = {"SPOUA, сентябрь (базовый)": "base", "SPOUA, март": "march",
+               "экватор, сентябрь": "equator", "полярная, сентябрь": "polar"}[label]
+        R[f"geo.{key}.h_heat_km"] = h_q / 1e3
         print(f"   {label:<28}{float(atm.density(70e3)):>12.2e}{h_q/1e3:>15.1f}")
     print()
 
@@ -189,3 +218,4 @@ if __name__ == "__main__":
     figure_atmosphere(exp, m00, m21)
     figure_trajectory(trs)
     print()
+    R.save(__file__)

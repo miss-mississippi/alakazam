@@ -1,4 +1,4 @@
-"""Диагностика по итогам ревью шага 1. Запуск: python explore_step1b.py
+"""Диагностика шага 1: где на самом деле идёт вброс. Запуск: python explore_step1b.py
 
 НЕ реализация шага 4 — это what-if прогоны на существующей траекторной
 модели, чтобы проверить три вещи до того, как менять план сборки:
@@ -23,6 +23,14 @@ import matplotlib.pyplot as plt
 
 from reentry import EntryState, ExponentialAtmosphere, Vehicle, integrate
 from reentry.constants import G0
+from reentry.results import Recorder
+
+# Шаги 1-2 определены для НЕВРАЩАЮЩЕЙСЯ Земли: вращение атмосферы вводится
+# на шаге 3. С тех пор integrate() включает его по умолчанию, поэтому
+# здесь оно выключено явно — иначе цифры шагов 1-2 не воспроизводятся.
+NO_ROT = dict(earth_rotation=False)
+R = Recorder("step1b")
+
 
 ATM = ExponentialAtmosphere()
 ENTRY = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5)
@@ -35,7 +43,7 @@ def part_a_heating_peak():
     print("   q ~ sqrt(rho)*V^3 против a ~ rho*V^2: скорость весит сильнее,")
     print("   плотность слабее, значит пик нагрева выше и раньше.\n")
     veh = Vehicle(mass=175.0, area=1.0, Cd=1.0)
-    tr = integrate(veh, ENTRY, ATM)
+    tr = integrate(veh, ENTRY, ATM, **NO_ROT)
     a, h_a, v_a = tr.peak_decel()
     h_q, v_q, t_q = tr.peak_heating()
     print(f"   пик торможения   {h_a/1e3:6.1f} км   V = {v_a:5.0f} м/с   "
@@ -43,6 +51,12 @@ def part_a_heating_peak():
     print(f"   пик нагрева      {h_q/1e3:6.1f} км   V = {v_q:5.0f} м/с   "
           f"t = {t_q:.0f} с")
     print(f"   разнос           {(h_q - h_a)/1e3:6.1f} км\n")
+    R["peaks.decel_h_km"] = h_a / 1e3
+    R["peaks.decel_V"] = v_a
+    R["peaks.decel_g"] = a / G0
+    R["peaks.heat_h_km"] = h_q / 1e3
+    R["peaks.heat_V"] = v_q
+    R["peaks.separation_km"] = (h_q - h_a) / 1e3
     return h_q
 
 
@@ -56,14 +70,20 @@ def part_b_cd_sweep():
     out = {}
     for Cd in (1.0, 1.5, 2.2):
         veh = Vehicle(mass=175.0, area=1.0, Cd=Cd)
-        tr = integrate(veh, ENTRY, ATM)
+        tr = integrate(veh, ENTRY, ATM, **NO_ROT)
         a, h_a, _ = tr.peak_decel()
         h_q, _, _ = tr.peak_heating()
         out[Cd] = (h_a, h_q)
+        key = f"cd.cd{Cd*10:.0f}"
+        R[f"{key}.beta"] = veh.ballistic_coefficient
+        R[f"{key}.h_decel_km"] = h_a / 1e3
+        R[f"{key}.h_heat_km"] = h_q / 1e3
         print(f"   {Cd:>5.1f}{veh.ballistic_coefficient:>14.1f}"
               f"{h_a/1e3:>14.1f}{h_q/1e3:>16.1f}{a/G0:>9.1f}")
     span_a = (out[2.2][0] - out[1.0][0]) / 1e3
     span_q = (out[2.2][1] - out[1.0][1]) / 1e3
+    R["cd.span_decel_km"] = span_a
+    R["cd.span_heat_km"] = span_q
     print(f"\n   разброс по высоте: торможение {span_a:+.1f} км, "
           f"нагрев {span_q:+.1f} км")
     print("   -> неопределённость Cd стоит меньше, чем разрыв до 70-80 км\n")
@@ -78,12 +98,12 @@ def fragment_run(beta_ratio: float, h_frag: float, Cd: float = 1.5):
     дают beta вдесятеро меньше.
     """
     intact = Vehicle(mass=175.0, area=1.0, Cd=Cd)
-    tr0 = integrate(intact, ENTRY, ATM, h_stop=h_frag)
+    tr0 = integrate(intact, ENTRY, ATM, h_stop=h_frag, **NO_ROT)
     restart = tr0.state_at_altitude(h_frag)
 
     # Сохраняем массу, режем beta через площадь: A_эфф = A * beta_ratio
     frag = Vehicle(mass=175.0, area=1.0 * beta_ratio, Cd=Cd)
-    tr1 = integrate(frag, restart, ATM)
+    tr1 = integrate(frag, restart, ATM, **NO_ROT)
     return tr0, tr1, frag
 
 
@@ -101,6 +121,8 @@ def part_c_fragmentation():
         h_q, _, _ = tr1.peak_heating()
         inside = OBSERVED_LO <= h_q / 1e3 <= OBSERVED_HI
         clipped = "  <- пик НА разрушении" if h_q > 77.9e3 else ""
+        R[f"frag.r{ratio}.beta"] = frag.ballistic_coefficient
+        R[f"frag.r{ratio}.h_heat_km"] = h_q / 1e3
         print(f"   {frag.ballistic_coefficient:>14.1f}{'1/' + str(ratio):>12}"
               f"{h_q/1e3:>16.1f}{'да' if inside else '':>10}{clipped}")
 
@@ -112,6 +134,7 @@ def part_c_fragmentation():
         h_q, _, _ = tr1.peak_heating()
         if base is None:
             base = h_q
+        R[f"breakup.h{hf/1e3:.0f}.h_heat_km"] = h_q / 1e3
         print(f"   {hf/1e3:>15.0f}{h_q/1e3:>16.1f}{(h_q-base)/1e3:>+10.1f}")
     print()
 
@@ -127,6 +150,9 @@ def part_c_fragmentation():
     beta_needed = 175.0 / (1.5 * ratios[i])
     beta_intact = 175.0 / 1.5
     factor = beta_intact / beta_needed
+    R["inverse.beta_needed"] = beta_needed
+    R["inverse.factor"] = factor
+    R["inverse.n_fragments"] = factor ** 3
     print(f"   C3. Обратная задача: чтобы пик нагрева лёг на {target/1e3:.0f} км,")
     print(f"       нужен beta осколка ~ {beta_needed:.1f} кг/м^2 против "
           f"{beta_intact:.1f} у целого,")
@@ -138,7 +164,8 @@ def part_c_fragmentation():
 
     print("   ВАЖНАЯ ОГОВОРКА: пик sqrt(rho)*V^3 — это ВЕРХНЯЯ ГРАНИЦА высоты")
     print("   вброса, а не сам вброс. Испарение требует НАКОПЛЕННОГО тепла:")
-    print("   сначала прогрев до 930 K, потом плавление, потом кипение при 2740 K.")
+    print("   сначала прогрев до ~900 K, потом плавление, потом кипение (~2000 K")
+    print("   на местном давлении торможения, 2792 K при 1 атм).")
     print("   Масса пойдёт ниже пика потока. Насколько — покажет шаг 4.")
     print("   Поэтому подгонять beta так, чтобы пик потока лёг ровно в 70-80 км,")
     print("   было бы ошибкой: тогда сама масса окажется слишком низко.\n")
@@ -151,7 +178,7 @@ def figure(ratios, heights, path="step1b_fragmentation.png"):
     # 1: форма нагрева vs торможения для целого объекта
     ax = axes[0]
     veh = Vehicle(mass=175.0, area=1.0, Cd=1.5)
-    tr = integrate(veh, ENTRY, ATM)
+    tr = integrate(veh, ENTRY, ATM, **NO_ROT)
     q = tr.heat_flux_shape / tr.heat_flux_shape.max()
     a = tr.decel / tr.decel.max()
     ax.plot(q, tr.h / 1e3, lw=1.7, label=r"нагрев $\sqrt{\rho}V^3$")
@@ -206,4 +233,5 @@ if __name__ == "__main__":
     part_b_cd_sweep()
     ratios, heights = part_c_fragmentation()
     figure(ratios, heights)
+    R.save(__file__)
     print()

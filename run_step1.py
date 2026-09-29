@@ -14,6 +14,14 @@ import matplotlib.pyplot as plt
 
 from reentry import EntryState, ExponentialAtmosphere, Vehicle, allen_eggers, integrate
 from reentry.constants import G0
+from reentry.results import Recorder
+
+# Шаги 1-2 определены для НЕВРАЩАЮЩЕЙСЯ Земли: вращение атмосферы вводится
+# на шаге 3. С тех пор integrate() включает его по умолчанию, поэтому
+# здесь оно выключено явно — иначе цифры шагов 1-2 не воспроизводятся.
+NO_ROT = dict(earth_rotation=False)
+R = Recorder("step1")
+
 
 plt.rcParams.update({
     "figure.dpi": 130,
@@ -58,6 +66,16 @@ def print_report(traj, ae, vehicle, entry, atmosphere):
         ("высота пика, км", h_num / 1e3, ae["h_at_peak"] / 1e3),
         ("скорость в пике, м/с", v_num, ae["V_at_peak"]),
     ]
+    R["base.t_end"] = traj.t[-1]
+    R["base.range_km"] = traj.s[-1] / 1e3
+    R["base.amax_g"] = a_num / G0
+    R["base.h_peak_km"] = h_num / 1e3
+    R["base.V_peak"] = v_num
+    R["base.gamma_peak_deg"] = traj.gamma_deg[i_peak]
+    R["base.gamma_end_deg"] = traj.gamma_deg[-1]
+    for key, (label, num, ana) in zip(("amax_g", "h_km", "V"), rows):
+        R[f"ae.{key}"] = ana
+        R[f"ae.{key}_dev_pct"] = 100.0 * (num - ana) / ana
     for label, num, ana in rows:
         dev = 100.0 * (num - ana) / ana
         print(f"    {label:<26}{num:>12.2f}{ana:>15.2f}{dev:>9.0f}%")
@@ -131,12 +149,17 @@ def figure_gamma_sweep(vehicle, atmosphere, path="step1_gamma_sweep.png"):
 
     for g0 in (-1.0, -1.5, -2.0, -3.0):
         entry = EntryState(gamma_deg=g0)
-        traj = integrate(vehicle, entry, atmosphere)
+        traj = integrate(vehicle, entry, atmosphere, **NO_ROT)
         a, hp, _ = traj.peak_decel()
         lbl = f"$\\gamma_0$={g0:+.1f}°"
         axes[0].plot(traj.t, traj.h / 1e3, lw=1.5, label=lbl)
         axes[1].plot(traj.t, traj.V / 1e3, lw=1.5, label=lbl)
         axes[2].plot(traj.decel / G0, traj.h / 1e3, lw=1.5, label=lbl)
+        key = f"gamma_sweep.g{abs(g0)*10:.0f}"
+        R[f"{key}.t"] = traj.t[-1]
+        R[f"{key}.range_km"] = traj.s[-1] / 1e3
+        R[f"{key}.amax_g"] = a / G0
+        R[f"{key}.h_km"] = hp / 1e3
         print(f"    {g0:>+8.1f}{traj.t[-1]:>12.0f}{traj.s[-1]/1e3:>16.0f}"
               f"{a/G0:>10.1f}{hp/1e3:>13.1f}")
 
@@ -160,7 +183,7 @@ def main():
     entry = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5)
     atmosphere = ExponentialAtmosphere()
 
-    traj = integrate(vehicle, entry, atmosphere, h_stop=30e3)
+    traj = integrate(vehicle, entry, atmosphere, h_stop=30e3, **NO_ROT)
     ae = allen_eggers(vehicle, entry)
 
     print_report(traj, ae, vehicle, entry, atmosphere)
@@ -168,6 +191,7 @@ def main():
     print()
     figure_gamma_sweep(vehicle, atmosphere)
     print()
+    R.save(__file__)
 
 
 if __name__ == "__main__":

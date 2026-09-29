@@ -1,9 +1,10 @@
-"""Проверки шага 2. Запуск: python verify_step2.py
+"""Проверки шага 2. Запуск: python verify_step2.py  (или pytest)
 
 1. Точность сплайна против прямого вызова pymsis.
-2. Сходимость по шагу табуляции dh.
-3. Сходимость траектории по dh.
+2. Швы производной log(rho) у NRLMSISE-00 и их отсутствие у 2.1.
+3. Сходимость траектории по шагу табуляции dh.
 4. Механизм: почему солнечная активность на 120 км почти не работает.
+5. География и сезон против солнечной активности.
 """
 
 from __future__ import annotations
@@ -13,6 +14,13 @@ import pymsis
 
 from reentry import EntryState, MSISAtmosphere, Vehicle, integrate
 from reentry.constants import G0
+from reentry.results import Recorder
+
+# Шаги 1-2 определены для невращающейся Земли; integrate() по умолчанию
+# вращение включает, поэтому здесь оно выключено явно.
+NO_ROT = dict(earth_rotation=False)
+R = Recorder("verify_step2")
+
 
 VEH = Vehicle(mass=175.0, area=1.0, Cd=1.5)
 ENTRY = EntryState(altitude=120e3, velocity=7500.0, gamma_deg=-1.5)
@@ -48,14 +56,18 @@ def test_spline_accuracy():
     print("   рвётся производная (внутренние границы формулировки), а кубический")
     print("   сплайн сглаживает излом. Цена 0.1% против собственной")
     print("   неопределённости MSIS в 10-30% — пренебрежимо.")
-    ok = err[~near_seam].max() < 1e-4 and err.max() < 5e-3
-    print(f"   -> {'OK' if ok else 'ПРОВАЛ'}\n")
-    return ok
+    R["spline.max_err_far"] = err[~near_seam].max()
+    R["spline.median_err_far"] = np.median(err[~near_seam])
+    R["spline.max_err_seam"] = err[near_seam].max()
+    print()
+    assert err[~near_seam].max() < 1e-4, f"ошибка сплайна {err[~near_seam].max():.1e}"
+    assert err.max() < 5e-3, f"ошибка у шва {err.max():.1e}"
 
 
 def test_model_seams():
     print("1b. ГДЕ У САМОЙ МОДЕЛИ РВЁТСЯ ПРОИЗВОДНАЯ")
     hh = np.arange(40e3, 130e3, 50.0)
+    found = {}
     for ver in (0, 2.1):
         out = pymsis.calculate(DATE, -140.0, -40.0, hh / 1e3, f107s=140.0,
                                f107as=140.0, aps=[[4.0] * 7], version=ver)
@@ -65,6 +77,7 @@ def test_model_seams():
         idx = np.where(d2 > 12 * med)[0]
         if idx.size == 0:
             print(f"   NRLMSIS {ver}: швов не найдено, профиль гладкий")
+            found[ver] = []
             continue
         groups = []
         cur = [idx[0]]
@@ -78,9 +91,14 @@ def test_model_seams():
         peaks = [hh[g[int(np.argmax(d2[g]))]] / 1e3 for g in groups]
         name = "NRLMSISE-00" if ver == 0 else f"NRLMSIS {ver}"
         print(f"   {name}: изломы на " + ", ".join(f"{p:.1f} км" for p in peaks))
+        found[ver] = peaks
     print("   -> 2.x гладкая. Для адаптивного интегратора это плюс, и один")
     print("      из изломов MSISE-00 (72.5 км) лежит прямо в зоне абляции.\n")
-    return True
+    R["seams.msis00_km"] = found[0]
+    R["seams.msis21_count"] = len(found[2.1])
+    for s_km in (72.5, 123.4):
+        assert any(abs(p - s_km) < 1.0 for p in found[0]), f"шов {s_km} км не найден"
+    assert not found[2.1], f"у NRLMSIS 2.1 найдены изломы: {found[2.1]}"
 
 
 def test_grid_convergence():
@@ -95,18 +113,18 @@ def test_grid_convergence():
     for dh in (2000.0, 1000.0, 250.0, 100.0):
         atm = MSISAtmosphere(dh=dh, **KW)
         err = np.abs(atm.density(h) / ref - 1.0).max()
-        tr = integrate(VEH, ENTRY, atm)
+        tr = integrate(VEH, ENTRY, atm, **NO_ROT)
         _, h_a, _ = tr.peak_decel()
         h_q, _, _ = tr.peak_heating()
         print(f"   {dh:>8.0f}{len(atm._h_grid):>8d}{err:>14.2e}"
               f"{h_a/1e3:>13.3f}{h_q/1e3:>15.3f}")
-        if prev is not None and abs(h_q - prev) > 50.0:
+        if prev is not None and abs(h_q - prev) > 1.0:
             ok = False
         prev = h_q
-    print("   Заметь: макс. ошибка не падает монотонно с dh — она упирается")
-    print("   в те же два шва модели, а не в разрешение сетки. Зато высоты")
-    print("   пиков совпадают до метра при любом dh, а это и есть критерий.\n")
-    return ok
+    print("   Макс. ошибка не падает монотонно с dh — она упирается в те же")
+    print("   два шва модели, а не в разрешение сетки. Высоты пиков совпадают")
+    print("   до метра при любом dh, а это и есть критерий.\n")
+    assert ok, "высота пика нагрева сдвигается больше чем на 1 м при смене dh"
 
 
 def test_solar_mechanism():
@@ -123,12 +141,11 @@ def test_solar_mechanism():
         hi = float(_direct([h * 1e3], f107=220.0)[0])
         ratios[h] = hi / lo
         print(f"   {h:>7}{lo:>12.3e}{hi:>12.3e}{hi/lo:>12.2f}")
-    ok = ratios[120] < 1.3 and ratios[400] > 3.0
-    print(f"\n   -> {'ПОДТВЕРЖДЕНО' if ok else 'НЕ ПОДТВЕРЖДЕНО'}: "
-          f"на 120 км x{ratios[120]:.2f}, на 400 км x{ratios[400]:.1f}")
-    print("      Значит утверждение 'солнечная активность меняет плотность")
-    print("      на 120 км в разы' было НЕВЕРНЫМ. Это верно для 300+ км.\n")
-    return ok
+    print(f"\n   на 120 км x{ratios[120]:.2f}, на 400 км x{ratios[400]:.1f}:")
+    print("   солнечная активность меняет плотность в разы только на 300+ км.\n")
+    for h, r in ratios.items():
+        R[f"solar_ratio.{h}"] = r
+    assert ratios[120] < 1.3 and ratios[400] > 3.0, f"отношения {ratios}"
 
 
 def test_geography_dominates():
@@ -136,7 +153,7 @@ def test_geography_dominates():
     print("   Сравниваем размах трёх факторов по высоте пика нагрева.\n")
     def peak(**kw):
         atm = MSISAtmosphere(**{**KW, **kw})
-        return integrate(VEH, ENTRY, atm).peak_heating()[0]
+        return integrate(VEH, ENTRY, atm, **NO_ROT).peak_heating()[0]
 
     solar = [peak(f107=f, f107a=f) for f in (70.0, 220.0)]
     geomag = [peak(ap=a) for a in (4.0, 80.0)]
@@ -148,16 +165,19 @@ def test_geography_dominates():
             ("широта -75...0", lat),
             ("сезон март/сентябрь", season)]
     print(f"   {'фактор':<36}{'размах, км':>12}")
+    keys = {"солнечная активность F10.7 70-220": "solar", "геомагнитная буря Ap 4-80": "geomag",
+            "широта -75...0": "lat", "сезон март/сентябрь": "season"}
+    spans = {}
     for label, vals in sorted(rows, key=lambda r: -abs(r[1][1] - r[1][0])):
-        print(f"   {label:<36}{abs(vals[1]-vals[0])/1e3:>12.1f}")
+        spans[keys[label]] = abs(vals[1] - vals[0]) / 1e3
+        print(f"   {label:<36}{spans[keys[label]]:>12.1f}")
+        R[f"env_span_km.{keys[label]}"] = spans[keys[label]]
     print("\n   Для сравнения: свип Cd 1.0-2.2 даёт 5.8 км,")
     print("   а фрагментация — около 20 км.\n")
-    return True
+    assert spans["lat"] > 10 * max(spans["solar"], 0.1), "широта должна бить F10.7"
+    assert spans["season"] > 5 * max(spans["solar"], 0.1), "сезон должен бить F10.7"
 
 
 if __name__ == "__main__":
-    print()
-    res = [test_spline_accuracy(), test_model_seams(), test_grid_convergence(),
-           test_solar_mechanism(), test_geography_dominates()]
-    print("ИТОГ:", "все проверки пройдены" if all(res) else "есть провалы")
-    print()
+    from reentry.checks import run_checks
+    raise SystemExit(run_checks(globals(), R, __file__))
