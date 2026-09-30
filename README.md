@@ -41,6 +41,9 @@ which no current model resolves.
 3. **The surface state is not the main uncertainty.** The "film" and "bare melt"
    scenarios differ by a factor of 1.4<!--=step5.scenarios.ratio:.1f-->: at ~2000 K the film emissivity is
    pinned by the α-Al₂O₃ reference point, and the liquid metal's is already ~0.17.
+   The heat of Al oxidation, left out of the baseline, can add up to ×1.8<!--=step5.sensitivity.oxidation.ratio:.1f-->
+   at the diffusion limit of the oxygen supply, and boiling at the lower side-band
+   pressure adds 17<!--=step5.side_pressure.film.change_pct:.0f-->%; neither moves the injection altitude.
 4. **The mass is set by where the aluminium sits.** At the same 30% fraction, the
    distribution of Al over fragments gives 0<!--=step5.sensitivity.al_split.lo:.0f-->–17<!--=step5.sensitivity.al_split.hi:.0f--> kg, a thin-walled mass fraction
    of 25–75% gives 4.3<!--=step5.sensitivity.thin_fraction.lo:.1f-->–13.1<!--=step5.sensitivity.thin_fraction.hi:.1f--> kg, and a breakup altitude of ±10 km gives 4.4<!--=step5.sensitivity.breakup.lo:.1f-->–11.1<!--=step5.sensitivity.breakup.hi:.1f--> kg.
@@ -120,7 +123,7 @@ alakazam/
 Stable fragment orientation (the fast-tumbling limit is checked separately); three
 fragment classes, each treated thermally as aluminium; the melt stays on the
 fragment until it boils; vapour blowing and the heat of oxidation are not in the
-base case; the emissivity of bare liquid Al is estimated from electrical
+base case but are sensitivity axes; the emissivity of bare liquid Al is estimated from electrical
 resistivity; breakup altitudes are inputs, not results. The full list is in
 [section 15 of the report](docs/REPORT.md#15-full-list-of-assumptions).
 

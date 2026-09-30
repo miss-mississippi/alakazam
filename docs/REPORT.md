@@ -5,6 +5,7 @@
 **Code:** Python (numpy, scipy, matplotlib, pymsis), repository [alakazam](https://github.com/miss-mississippi/alakazam)
 **Status:** the model is complete, 37<!--=checks.total:.0f--> automated checks pass, the experimental part is designed
 **Version 2:** errors found in review are fixed (section 18.2); the main result is recomputed
+**Version 2.1:** the heat of oxidation and boiling at the side-band pressure are added as sensitivity axes (sections 9.5, 12); the baseline is unchanged
 
 ---
 
@@ -54,7 +55,7 @@ The molten mass is 32.4<!--=step5.scenarios.film.melt:.1f-->–32.8<!--=step5.sc
 1. **Demise in DRAMA/ORSAT means melting, not evaporation.** The energy to melt is 1.01<!--=step4.criteria.melt:.2f--> MJ/kg (ORSAT has 0.93; the 8<!--=verify_step4.orsat.diff_pct:.0f-->% difference comes from the alloy properties), to evaporate completely 13.6<!--=step4.criteria.vapour:.1f--> MJ/kg, a factor of 13.4<!--=step4.criteria.ratio:.1f-->. Between "demised" and "became Al₂O₃ nanoparticles" sits a yield factor that DRAMA does not compute.
 2. **Aluminium on a fragment surface boils at the stagnation pressure, not at 1 atm.** At 70–80 km that is 0.1–1 kPa and 1750–2050 K instead of 2792 K. The evaporation threshold εσT⁴ drops threefold, and the evaporated mass in the "active oxide film" scenario goes from 0.6<!--=step5.changes.film_1atm:.1f--> to 8.5<!--=step5.scenarios.film.total:.1f--> kg. This is the largest physical correction in the whole work.
 3. **The result is a melt/evaporation bracket, not a single number.** Its width (32.5 versus 8.5<!--=step5.scenarios.film.total:.1f-->–12.0<!--=step5.scenarios.bare.total:.1f--> kg Al) is set by the fate of the droplet phase, which nobody computes. The two surface scenarios differ by only a factor of 1.4<!--=step5.scenarios.ratio:.1f-->: at ~2000 K the film ε is pinned by the α-Al₂O₃ reference point (1800 K), and the liquid metal ε is already ~0.17.
-4. **The mass is set above all by where the aluminium sits and what fraction of the mass is thin-walled.** At the same total fraction of 30%, the distribution of Al over fragments gives 0<!--=step5.sensitivity.al_split.lo:.0f-->–17<!--=step5.sensitivity.al_split.hi:.0f--> kg, a thin-walled mass fraction of 25–75% gives 4.3<!--=step5.sensitivity.thin_fraction.lo:.1f-->–13.1<!--=step5.sensitivity.thin_fraction.hi:.1f--> kg, and a breakup altitude of ±10 km gives 4.4<!--=step5.sensitivity.breakup.lo:.1f-->–11.1<!--=step5.sensitivity.breakup.hi:.1f--> kg. The surface state (1.4<!--=step5.sensitivity.surface.ratio:.1f-->×) is on a par with vapour blowing (1.7<!--=step5.sensitivity.blowing.ratio:.1f-->×) and orientation (1.5<!--=step5.sensitivity.orientation.ratio:.1f-->×).
+4. **The mass is set above all by where the aluminium sits and what fraction of the mass is thin-walled.** At the same total fraction of 30%, the distribution of Al over fragments gives 0<!--=step5.sensitivity.al_split.lo:.0f-->–17<!--=step5.sensitivity.al_split.hi:.0f--> kg, a thin-walled mass fraction of 25–75% gives 4.3<!--=step5.sensitivity.thin_fraction.lo:.1f-->–13.1<!--=step5.sensitivity.thin_fraction.hi:.1f--> kg, and a breakup altitude of ±10 km gives 4.4<!--=step5.sensitivity.breakup.lo:.1f-->–11.1<!--=step5.sensitivity.breakup.hi:.1f--> kg. The surface state (1.4<!--=step5.sensitivity.surface.ratio:.1f-->×) is on a par with vapour blowing (1.7<!--=step5.sensitivity.blowing.ratio:.1f-->×) and orientation (1.5<!--=step5.sensitivity.orientation.ratio:.1f-->×). The heat of Al oxidation, left out of the baseline, can add up to 1.8<!--=step5.sensitivity.oxidation.ratio:.1f-->× at the diffusion limit of the oxygen supply (section 9.5); none of these axes moves the injection altitude.
 5. **The injection altitude is inherited, not predicted.** In the 68–83 km window the injection median is ≈ 75.9<!--=step5b.transfer.intercept78:.1f--> + 0.82<!--=step5b.transfer.gain_mid:.2f-->·(H − 78) km, where H is the breakup altitude; at a fixed H the offset is +1.7<!--=step5b.offsets.min:+.1f-->…+2.8<!--=step5b.offsets.max:+.1f--> km across all other parameters. The main altitude uncertainty lies in the observational data.
 6. **Comparison with Ferreira: order-of-magnitude agreement.** Ferreira oxidises 32<!--=step5.ferreira.theirs.pct:.0f-->% of the Al (24.0 of 75 kg), an output of their molecular dynamics. We evaporate 16<!--=step5.ferreira.film_uniform.pct:.0f-->–23<!--=step5.ferreira.bare_uniform.pct:.0f-->% with uniform Al and 32<!--=step5.ferreira.film_thin.pct:.0f-->–46<!--=step5.ferreira.bare_thin.pct:.0f-->% if the Al is concentrated in thin-walled parts.
 7. **The experiment is still needed, but it does not close the main uncertainty.** It pins down the "active oxide film" scenario and the oxide-thickness threshold. For that the mid-IR total hemispherical reflectance is required (without it the error is −84<!--=step5b.no_midir.T2000.err_pct:.0f-->%): a gold integrating sphere is needed; the ATR accessories in the NU equipment list are unsuitable. The main unknowns for mass are the bill of materials of the fragments and the breakup altitude.
@@ -599,6 +600,8 @@ q_net = q_hw / (1 + η·h_0/H_eff)
 
 **Which η.** The first version labelled "0.3 laminar, 0.6 turbulent". It is the other way round: in a laminar layer blowing blocks the flux more strongly, and turbulent mixing damps the effect (transpiration cooling experiments in hypersonic flow, AIAA J. 10.2514/1.J053053). At 70–80 km the layer is laminar. The specific value of η has not been checked against a primary source, so blowing is **not part of the base case** but a sensitivity axis: η = 0.6 in the per-band model lowers evaporation from 8.5 to 4.9 kg Al (section 12). In the model only the excess flux in boiling bands is blocked: `q_evap = (q_in − rad)/(1 + η·(h_0 − h_w)/L)`.
 
+Blowing has a counterpart of the opposite sign: the oxygen that diffuses through the same boundary layer reacts with the aluminium and releases heat. It is treated in section 9.5.
+
 ---
 
 ## 8. Step 4. Fragmentation, thermal response, ablation
@@ -687,6 +690,8 @@ h₃ = h₂ + c_p,liq(T_boil(p) − T_melt) ≈ 2.0–2.4 MJ/kg  start of boilin
 | L_vap, MJ/kg | 11.30<!--=step4.boil.p100.L:.2f--> | 11.26<!--=step4.boil.p300.L:.2f--> | 11.20<!--=step4.boil.p1000.L:.2f--> | 11.15<!--=step4.boil.p3000.L:.2f--> | 10.90<!--=step4.boil.p101325.L:.2f--> |
 
 Against the CRC vapour-pressure table for Al the difference is 0.0–1.4<!--=verify_step4.crc.max_diff_pct:.1f-->% from 1 Pa to 1 atm (check 4.8). On the fragment trajectories boiling happens at 1759<!--=step4.fragments.film.panels.Tb_min:.0f-->–2039<!--=step4.fragments.film.mli.Tb_max:.0f--> K. The heat of vaporization includes the Kirchhoff correction. When the pressure drops as the body decelerates, the plateau goes down and the superheated melt flashes (numerical time constant 0.2 s; at 0.05 s the result changes by 0.004<!--=verify_step4.flash.diff_pct:.3f-->%).
+
+The whole surface boils at the stagnation pressure. On the side bands the pressure is lower (Newtonian `p₀·cos²θ`, consistent with the `cos θ` flux) and so is the boiling point. Boiling each band at its own pressure raises the evaporated mass by 17<!--=step5.side_pressure.film.change_pct:.0f-->% in the film scenario and by 14<!--=step5.side_pressure.bare.change_pct:.0f-->% in the bare-melt one, with the median unchanged (section 9.5): the baseline is on the conservative side.
 
 For each band:
 
@@ -897,6 +902,45 @@ Time t is counted **from the moment of breakup**: the fragment surface is fresh,
 
 The whole spread over τ fits between the two scenarios. The unknown is renamed from "which ε" to "how fast the film grows". Hence the conclusion for the experiment: ε should be measured **as a function of oxide thickness**, not as a single number.
 
+### 9.5 Heat of oxidation: an upper bound
+
+Version 2 left the heat of Al oxidation out with the argument "the film is nanometre-thick, so the contribution is small". That argument is wrong: the heat release is set by how fast oxygen is supplied, not by the thickness of the film. A boiling, constantly renewed melt can keep consuming oxygen while the film stays thin.
+
+The supply is bounded by diffusion through the boundary layer. With a Lewis number of 1 the Reynolds analogy gives one transfer coefficient for heat and mass, `C = q_cold/h_0`, so the oxygen flux to the wall is at most `Y_O·q_cold/h_0`. If all of it reacts at the wall (2Al + 3/2 O₂ → Al₂O₃, ΔH = 34.9 MJ per kg of O):
+
+```
+q_ox / q_hw = η · Y_O · ΔH_ox / (h_0 − h_w)          Y_O = 0.231,  η ∈ [0, 1]
+```
+
+At η = 1 this is 0.23 · 35 / 27 ≈ 0.3 at orbital speed. The ratio does not depend on altitude or fragment size (both cancel in the transfer coefficient), but it grows as the fragment slows down, because h₀ = V²/2 falls while the heat per kilogram of oxygen does not (T_wall = 2046 K):
+
+| V, m/s | 7500 | 7000 | 6500 | 6000 |
+|---|---|---|---|---|
+| q_ox / q_hw at η = 1 | 0.32<!--=step5.oxidation.ratio.V7500:.2f--> | 0.37<!--=step5.oxidation.ratio.V7000:.2f--> | 0.44<!--=step5.oxidation.ratio.V6500:.2f--> | 0.53<!--=step5.oxidation.ratio.V6000:.2f--> |
+
+In the model (`oxidation_eta`) each band gets this extra input on its **molten** part only: solid aluminium is passivated by its own oxide. The Al that the oxygen would consume is reported separately and **not** removed from the fragments, so the evaporated mass stays an upper bound.
+
+| scenario | η | Al evaporated, kg | × baseline | median, km | Al oxidized at the wall, kg |
+|---|---|---|---|---|---|
+| active oxide film | 0 (baseline) | 8.5<!--=step5.oxidation.film.eta000.total:.1f--> | 1.00 | 76.1<!--=step5.oxidation.film.eta000.median:.1f--> | — |
+| active oxide film | 0.5 | 12.6<!--=step5.oxidation.film.eta050.total:.1f--> | 1.48<!--=step5.oxidation.film.eta050.factor:.2f--> | 75.9<!--=step5.oxidation.film.eta050.median:.1f--> | 5.2<!--=step5.oxidation.film.eta050.ox_al:.1f--> |
+| active oxide film | 1 (upper bound) | 15.4<!--=step5.oxidation.film.eta100.total:.1f--> | 1.80<!--=step5.oxidation.film.eta100.factor:.2f--> | 75.9<!--=step5.oxidation.film.eta100.median:.1f--> | 7.4<!--=step5.oxidation.film.eta100.ox_al:.1f--> |
+| bare melt | 0 (baseline) | 12.0<!--=step5.oxidation.bare.eta000.total:.1f--> | 1.00 | 75.9<!--=step5.oxidation.bare.eta000.median:.1f--> | — |
+| bare melt | 0.5 | 15.6<!--=step5.oxidation.bare.eta050.total:.1f--> | 1.30<!--=step5.oxidation.bare.eta050.factor:.2f--> | 75.8<!--=step5.oxidation.bare.eta050.median:.1f--> | 4.0<!--=step5.oxidation.bare.eta050.ox_al:.1f--> |
+| bare melt | 1 (upper bound) | 18.1<!--=step5.oxidation.bare.eta100.total:.1f--> | 1.51<!--=step5.oxidation.bare.eta100.factor:.2f--> | 75.9<!--=step5.oxidation.bare.eta100.median:.1f--> | 5.8<!--=step5.oxidation.bare.eta100.ox_al:.1f--> |
+
+What this means:
+
+1. **The upper bound is ×1.8<!--=step5.oxidation.film.eta100.factor:.1f--> for the film scenario and ×1.5<!--=step5.oxidation.bare.eta100.factor:.1f--> for bare melt**: larger than the difference between the two surface scenarios (×1.4). A constant +30% of the flux gives less, because the ratio grows during deceleration. The axis goes into the budget (section 12).
+2. **The altitude does not move**: the median changes by 0.2<!--=step5.sensitivity.oxidation.median_span:.1f--> km.
+3. **The real η lies between 0 and 1.** Part of the reaction happens in the gas: the Al vapour burns in the boundary layer, and that heat is partly carried off by the flow. The oxide skin slows the rest: bulk aluminium ignites only near the melting point of its oxide, ~2300 K (Friedman & Maček 1962), above the 1750–2050 K of the boiling surface here.
+4. **The axis is not independent of the surface scenarios.** An intact, optically active oxide film is exactly what passivates the melt (η close to 0); a bare, constantly renewed melt is where oxidation can approach the diffusion limit. The coherent pairs are "film, η ≈ 0" (8.5<!--=step5.oxidation.film.eta000.total:.1f--> kg) and "bare melt, η up to 1" (up to 18.1<!--=step5.oxidation.bare.eta100.total:.1f--> kg).
+5. **At the upper bound the wall also makes condensed oxide directly**: 7.4<!--=step5.oxidation.film.eta100.ox_al:.1f--> kg of Al for the film scenario. This is Al₂O₃ in the atmosphere too, but as a surface product (slag, droplets), not as vapour that nucleates nanoparticles. It is a diagnostic, not part of the evaporated mass.
+
+Conclusion 3 holds: the surface state is not the main uncertainty. The heat of oxidation joins the axes of order 1.5–1.8× and does not change the altitude result.
+
+The same run also quantifies the side-band pressure (section 8.4): boiling at the local `p₀·cos²θ` gives 9.9<!--=step5.side_pressure.film.total:.1f--> kg instead of 8.5 (+17<!--=step5.side_pressure.film.change_pct:.0f-->%) for the film and 13.7<!--=step5.side_pressure.bare.total:.1f--> kg instead of 12.0 (+14<!--=step5.side_pressure.bare.change_pct:.0f-->%) for bare melt; the median stays at 76.0<!--=step5.side_pressure.film.median:.1f--> km.
+
 ---
 
 ## 10. What the model predicts and what it inherits
@@ -1001,14 +1045,18 @@ Some parameters move the injection altitude and some move the mass. They must no
 | **distribution of Al over fragments** | 0.0<!--=step5.sensitivity.al_split.lo:.1f--> – 17.0<!--=step5.sensitivity.al_split.hi:.1f--> | ∞ | 0.0<!--=step5.sensitivity.al_split.median_span:.1f--> |
 | **thin-walled mass fraction 25–75%** | 4.3<!--=step5.sensitivity.thin_fraction.lo:.1f--> – 13.1<!--=step5.sensitivity.thin_fraction.hi:.1f--> | 3.1<!--=step5.sensitivity.thin_fraction.ratio:.1f-->× | 0.2<!--=step5.sensitivity.thin_fraction.median_span:.1f--> |
 | **breakup altitude ±10 km** | 4.4<!--=step5.sensitivity.breakup.lo:.1f--> – 11.1<!--=step5.sensitivity.breakup.hi:.1f--> | 2.5<!--=step5.sensitivity.breakup.ratio:.1f-->× | **15.1<!--=step5.sensitivity.breakup.median_span:.1f-->** |
+| heat of oxidation, η 0–1 (upper bound; not in the baseline) | 8.5<!--=step5.sensitivity.oxidation.lo:.1f--> – 15.4<!--=step5.sensitivity.oxidation.hi:.1f--> | 1.8<!--=step5.sensitivity.oxidation.ratio:.1f-->× | 0.2<!--=step5.sensitivity.oxidation.median_span:.1f--> |
 | orbit inclination 0–180° | 7.4<!--=step5.sensitivity.inclination.lo:.1f--> – 12.4<!--=step5.sensitivity.inclination.hi:.1f--> | 1.7<!--=step5.sensitivity.inclination.ratio:.1f-->× | 0.2<!--=step5.sensitivity.inclination.median_span:.1f--> |
 | vapour blowing, η 0–0.6 | 4.9<!--=step5.sensitivity.blowing.lo:.1f--> – 8.5<!--=step5.sensitivity.blowing.hi:.1f--> | 1.7<!--=step5.sensitivity.blowing.ratio:.1f-->× | 0.3<!--=step5.sensitivity.blowing.median_span:.1f--> |
 | orientation: stable / fast tumbling | 5.9<!--=step5.sensitivity.orientation.lo:.1f--> – 8.5<!--=step5.sensitivity.orientation.hi:.1f--> | 1.5<!--=step5.sensitivity.orientation.ratio:.1f-->× | 0.1<!--=step5.sensitivity.orientation.median_span:.1f--> |
 | surface scenario (film / bare) | 8.5<!--=step5.sensitivity.surface.lo:.1f--> – 12.0<!--=step5.sensitivity.surface.hi:.1f--> | 1.4<!--=step5.sensitivity.surface.ratio:.1f-->× | 0.2<!--=step5.sensitivity.surface.median_span:.1f--> |
 | film growth τ 1–10⁴ s | 8.7<!--=step5.sensitivity.growth.lo:.1f--> – 11.9<!--=step5.sensitivity.growth.hi:.1f--> | 1.4<!--=step5.sensitivity.growth.ratio:.1f-->× | 0.2<!--=step5.sensitivity.growth.median_span:.1f--> |
+| boiling at the local pressure `p₀·cos²θ` | 8.5<!--=step5.sensitivity.side_pressure.lo:.1f--> – 9.9<!--=step5.sensitivity.side_pressure.hi:.1f--> | 1.2<!--=step5.sensitivity.side_pressure.ratio:.1f-->× | 0.1<!--=step5.sensitivity.side_pressure.median_span:.1f--> |
 | plate thickness ×2 / ÷2 | 7.8<!--=step5.sensitivity.thickness.lo:.1f--> – 8.8<!--=step5.sensitivity.thickness.hi:.1f--> | 1.1<!--=step5.sensitivity.thickness.ratio:.1f-->× | 2.9<!--=step5.sensitivity.thickness.median_span:.1f--> |
 | film curve shape (48 sets) | 8.3<!--=step5.sensitivity.film_shape.lo:.1f--> – 9.0<!--=step5.sensitivity.film_shape.hi:.1f--> | 1.1<!--=step5.sensitivity.film_shape.ratio:.1f-->× | 0.1<!--=step5.sensitivity.film_shape.median_span:.1f--> |
 | entry angle −1…−3° | 8.4<!--=step5.sensitivity.entry_angle.lo:.1f--> – 8.5<!--=step5.sensitivity.entry_angle.hi:.1f--> | 1.0<!--=step5.sensitivity.entry_angle.ratio:.1f-->× | 1.1<!--=step5.sensitivity.entry_angle.median_span:.1f--> |
+
+Vapour blowing and the heat of oxidation are two boundary-layer effects of opposite sign that are both left out of the baseline: one blocks heat, the other adds it. Treated together they would partly cancel; a joint model of the vapour flame in the boundary layer is on the list of next steps (section 20).
 
 "Distribution of Al over fragments": at the same total fraction of 30%, all Al in the primary structure (0<!--=step5.sensitivity.al_split.lo:.0f--> kg, since it does not evaporate), uniform (8.5<!--=step5.sensitivity.base.total:.1f--> kg), all Al in thin-walled parts (17.0<!--=step5.sensitivity.al_split.hi:.1f--> kg).
 
@@ -1046,7 +1094,7 @@ Boiling at 1 atm instead of the local pressure would give 0.6<!--=step5.changes.
 
 A rule for the whole work: **the list of leading parameters must be built separately for each output quantity.** A single ranking of "what matters in this model" would be wrong no matter how carefully it was computed. For a paper this structure of the argument is worth more than any single number.
 
-**What changed in the ranking.** In the first version ε was the main mass axis. After the corrections the main axes are **where the aluminium sits and what fraction of the mass is thin-walled**, i.e. the bill of materials of the fragments of a specific spacecraft. The surface state is one of several axes of order 1.4–1.7×.
+**What changed in the ranking.** In the first version ε was the main mass axis. After the corrections the main axes are **where the aluminium sits and what fraction of the mass is thin-walled**, i.e. the bill of materials of the fragments of a specific spacecraft. The surface state is one of several axes of order 1.4–1.8×, alongside vapour blowing, orientation and the heat of oxidation.
 
 Inclination and latitude in these tables are not uncertainties but **known inputs**: for a specific spacecraft they come from its orbit.
 
@@ -1150,6 +1198,10 @@ Estimate of the total hemispherical ε from resistivity (Parker & Abbott, NASA S
 Check where reference data exist: polished solid Al at 600–900 K gives 0.045<!--=verify_step5.bare_eps.T600:.3f-->–0.068<!--=verify_step5.bare_eps.T900:.3f--> against the reference 0.04–0.07 (check 5.8). At 300–400 K the formula is below the handbook values (a perfectly clean surface without native oxide).
 
 This is **an estimate, not a measurement**: no direct data on the total ε of liquid Al above ~1500 K could be found, and the liquid resistivity above ~1500 K is an extrapolation. But the order of magnitude is clear: liquid metal at 2000 K is not a shiny polished surface at room temperature.
+
+**Validity at the working wavelengths.** Parker–Abbott is an expansion of the free-electron (Drude) model in its relaxation region, which requires ωτ ≪ 1. For liquid Al at 2000 K (39.7 uOhm·cm) the electron relaxation time is τ ≈ 6·10⁻¹⁶ s, so ωτ ≈ 0.8 at the Wien peak (1.45 um) and ≈ 0.4 at 3 um: the estimate is at the edge of its validity. (A point in its favour: the interband absorption of solid Al near 1.5 eV is a band-structure feature that the liquid largely loses, so the liquid behaves closer to free electrons.)
+
+**Why the result is robust to it anyway.** Evaporation is driven by the heat input, and re-radiation takes only part of it. At 2000 K a plate radiating from both sides loses `2εσT⁴` = 0.31 MW/m² at ε = 0.17 and 0.58 MW/m² at ε = 0.32, against a peak input of 2.2–4.0 MW/m² (220<!--=step4.fragments.film.panels.q_peak_wcm2:.0f-->–401<!--=step4.fragments.film.mli.q_peak_wcm2:.0f--> W/cm²) on thin fragments. Across the whole flight the constant-ε sweep gives the elasticity directly: a sevenfold change in ε (0.05 → 0.35) changes the mass by less than a factor of two (15.2<!--=step5.sweep.e005.total:.1f--> → 7.9<!--=step5.sweep.e035.total:.1f--> kg). Even an ε of the bare melt anywhere between 0.10 and 0.25 keeps the mass between 13.9<!--=step5.sweep.e010.total:.1f--> and 10.2<!--=step5.sweep.e025.total:.1f--> kg.
 
 ### 13.8 Hence two scenarios, and close ones
 
@@ -1300,9 +1352,9 @@ If there is no sphere, this is **the main blocker of the experimental part**, an
 ### Heating and ablation
 
 16. **Radiative heating from the shock layer is not included**: it switches on around 10 km/s and is negligible for entry from orbit (7.5 km/s).
-17. **Boiling at the stagnation pressure over the whole windward surface.** On the sides the pressure is lower (`~cos²θ`), and boiling there happens at a lower temperature, so the assumption underestimates evaporation. Evaporation below the boiling point (diffusive, Langmuir) is not modelled.
+17. **Boiling at the stagnation pressure over the whole windward surface.** On the sides the pressure is lower (`~cos²θ`), and boiling there happens at a lower temperature, so the assumption underestimates evaporation: by 17<!--=step5.side_pressure.film.change_pct:.0f-->% with the local Newtonian pressure (section 9.5). Evaporation below the boiling point (diffusive, Langmuir) is not modelled.
 18. **Vapour blowing is not in the base case**; sensitivity axis η 0–0.6 (8.5 → 4.9 kg).
-19. **The heat of Al oxidation is not included** (~31 MJ per kg of Al to Al₂O₃). For a nanometre-thick film the contribution is small; if oxidation happens in the boundary layer above the surface, the heat is carried away by the gas. Estimating the film growth rate is a separate task.
+19. **The heat of Al oxidation is not in the baseline** (31 MJ per kg of Al, 34.9 MJ per kg of O). Its size is set by the oxygen supply through the boundary layer, not by the film thickness. At the diffusion limit it adds 0.32–0.53 of the hot-wall flux and raises evaporation up to ×1.8 (film) and ×1.5 (bare melt); it is a sensitivity axis η 0–1 (section 9.5). The real η is below 1: part of the vapour burns in the gas, and the oxide skin passivates the melt.
 20. **An axisymmetric angular distribution** for a tumbling irregular body is an idealization without a free parameter.
 21. **The fate of the stripped melt is not modelled**: that is the width of the melt/evaporation bracket. Evaporation in place is computed with the melt retained (section 8.7).
 22. **The film ε(T)** is a single spectral curve fitted to bulk α-Al₂O₃; **the bare-metal ε(T)** is an estimate from the resistivity of pure Al.
@@ -1325,6 +1377,9 @@ If there is no sphere, this is **the main blocker of the experimental part**, an
 | c_p of air (hot wall) | 1300 J/(kg·K) | frozen c_p at 2500–3000 K | ~15% |
 | p₀ / (ρV²) | 0.92 | Rayleigh pitot formula, γ = 1.4, M → ∞ | ~5% (→ ~5 K in T_boil) |
 | η (blowing) | 0 in the base case; axis 0–0.6 | a laminar layer is blocked more strongly than a turbulent one (AIAA J. 10.2514/1.J053053) | value not verified |
+| Y_O | 0.231 | mass fraction of O in air, well mixed below ~100 km | ~1% |
+| ΔH of oxidation | 34.9 MJ per kg of O (31.0 per kg of Al) | ΔfH°(Al₂O₃) = −1675.7 kJ/mol, NIST-JANAF | ~3% at 2000 K |
+| η_ox (oxidation) | 0 in the base case; axis 0–1 | fraction of the diffusion-limited O supply reacting at the wall | upper bound at 1 |
 | c_p Al 6061, solid | 1038 J/(kg·K) | mean over 300–890 K from NIST Shomate for Al(s) | ~5% |
 | c_p Al, liquid | 1177 J/(kg·K) | NIST Shomate for Al(l), 31.75 J/(mol·K) | ~5% |
 | k (Al 6061) | 167 W/(m·K) | handbooks give 155–167 | ~7% |
@@ -1385,7 +1440,7 @@ Separately, `test_docs.py` (6 tests) checks the documents against the code: the 
 1. The mean of the angular distribution is exactly 0.25.
 2. Closed-form evaporation rate versus numerical integration: 1e−9.
 3. Convergence in the number of bands: spread < 0.5 p.p. at 24 bands.
-4. **Energy balance**: input = re-radiation + storage + evaporation + blocked by blowing, residual ~1e−15, including with blowing. The audit is accumulated **inside the same ODE system**.
+4. **Energy balance**: input = re-radiation + storage + evaporation + blocked by blowing, residual ~1e−15, including with blowing, with the heat of oxidation and with boiling at the local pressure. The audit is accumulated **inside the same ODE system**.
 5. Reproducing the ORSAT criterion: 8%.
 6. **Nesting and mass conservation per band**: in every band evaporated ≤ molten ≤ band mass. Without a forced `max()`; the first version passed this test by construction.
 7. Validity of the lumped model from the heating depth.
@@ -1460,6 +1515,9 @@ Numerical defects found along the way:
 | **Nine checks always returned True**: convergence, Allen–Eggers, sensitivity to β, MSIS seams, geography versus F10.7, S–G versus DKR, energy to evaporate, hot wall, validity of the lumped model | conversion to pytest: `return True` cannot fail | each now has a condition through `assert` |
 | **The two-sided plate check took the analytic value from the same model flag** | mutation test: with a broken plate the check still passed | the number of sides is now set by geometry, not by a flag |
 | **Allen–Eggers altitude with γ at the peak: 45.49 km in the text, 45.40 in the code**; 72.0 and 84.9 km in the transfer function, 400 W/cm², all manual roundings | `check_docs.py` | fixed automatically from the results |
+| **Heat of oxidation called small because the film is nanometre-thick** (version 2) | external review: the heat is set by the O supply through the boundary layer, not by the film thickness | an axis of up to ×1.8 was missing from the budget; now section 9.5 |
+| **Boiling on the side bands at the stagnation pressure** stated only qualitatively | external review | now quantified: +17% with the local pressure, the baseline is conservative |
+| **Validity of the bare-melt ε at the Wien peak not discussed** | external review | ωτ ≈ 0.8, at the edge of the Drude relaxation region; the robustness argument is now explicit (13.7) |
 | Small items: "4–16%" with ×1.24 at 40 km; "16° in latitude" (≈10°); Stardust "measured"; a 15.9 kg Ferreira line on the plot for 175 kg; 12 commits instead of 11 | review | — |
 
 ---
@@ -1493,6 +1551,9 @@ NRLMSISE-00 has a seam in the density derivative at 72.5 km, right in the ablati
 **"Coriolis?"**
 The equations are written in the inertial frame, and atmospheric rotation enters through the speed relative to the air. There are no Coriolis terms in this formulation. The cross-track component of the atmosphere velocity is not included; it contributes ~0.1% to the speed magnitude.
 
+**"You ignore the heat of oxidation."**
+Not any more. At the diffusion limit of the oxygen supply it adds 0.32–0.53 of the hot-wall flux and raises the evaporated mass up to ×1.8 for the film scenario and ×1.5 for bare melt, without moving the altitude (section 9.5). The real value is below that bound: part of the vapour burns in the gas, and an intact oxide film passivates the melt, which is also why "film" pairs with small oxidation and "bare melt" with large.
+
 **"What decides the mass, if not ε?"**
 Where the aluminium sits (0–17 kg at the same 30%), what fraction of the mass is thin-walled (4.3–13.1 kg), and at which altitude the object breaks up (4.4–11.1 kg). All of these are data about a specific spacecraft and its entry.
 
@@ -1510,6 +1571,7 @@ To measure ε(T) of the "oxide on Al 6061" system as a function of oxide thickne
 - A tumbling criterion: compare the rotation period of fragments with the thermal time constant (~3 s for a 1 mm plate).
 - Check the blowing η against a primary source and decide whether blowing goes into the base case.
 - Close the feedback of ablation on the ballistic coefficient.
+- A joint boundary-layer model of vapour blowing and vapour combustion (where the Al flame stands and how much of its heat returns to the wall): it fixes the blowing η and the oxidation η together, and they act in opposite directions.
 - Replace the axisymmetric angular distribution with an asymmetric one for the real fragment geometry.
 
 **Observations**
@@ -1575,6 +1637,8 @@ Git history: one commit per step and per major revision. What was corrected duri
 
 ## 22. References
 
+- Friedman R., Maček A. *Ignition and combustion of aluminium particles in hot ambient gases.* Combustion and Flame 6, 9–19, 1962 (ignition near the melting point of Al₂O₃).
+- Chase M.W. *NIST-JANAF Thermochemical Tables*, 4th ed., J. Phys. Chem. Ref. Data Monograph 9, 1998 (ΔfH° of Al₂O₃).
 - Allen H.J., Eggers A.J. *A study of the motion and aerodynamic heating of ballistic missiles entering the Earth's atmosphere at high supersonic speeds.* NACA TR-1381, 1958.
 - Sutton K., Graves R.A. *A general stagnation-point convective heating equation for arbitrary gas mixtures.* NASA TR R-376, 1971.
 - NASA TFAWS Aerothermodynamics Course, 2012 (the value k = 1.7415e−4 for Earth).

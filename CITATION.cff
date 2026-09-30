@@ -1,6 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this model or its results, please cite it as below."
 title: "alakazam: aluminium injection into the mesosphere from satellite reentry"
+type: software
 abstract: >-
   Reentry and ablation model that estimates how much aluminium a satellite
   vaporizes during atmospheric entry and at which altitudes it is injected,
@@ -13,8 +14,8 @@ authors:
     affiliation: Nazarbayev University
 repository-code: "https://github.com/miss-mississippi/alakazam"
 license: MIT
-version: 2.0.0
-date-released: 2026-09-29
+version: 2.1.0
+date-released: 2026-09-30
 keywords:
   - atmospheric reentry
   - satellite demise
