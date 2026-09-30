@@ -15,6 +15,14 @@ authors:
     orcid: "https://orcid.org/0009-0004-1983-3413"
 repository-code: "https://github.com/miss-mississippi/alakazam"
 license: MIT
+doi: 10.5281/zenodo.23053936
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.23053936
+    description: "Concept DOI: all versions, resolves to the latest"
+  - type: doi
+    value: 10.5281/zenodo.23053937
+    description: "Version 2.1.0"
 version: 2.1.0
 date-released: 2026-09-30
 keywords:

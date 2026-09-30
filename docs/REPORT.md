@@ -2,7 +2,7 @@
 
 **Author:** Beknur Orazbay ([ORCID 0009-0004-1983-3413](https://orcid.org/0009-0004-1983-3413)), Nazarbayev University
 **Period of work:** September 2026
-**Code:** Python (numpy, scipy, matplotlib, pymsis), repository [alakazam](https://github.com/miss-mississippi/alakazam)
+**Code:** Python (numpy, scipy, matplotlib, pymsis), repository [alakazam](https://github.com/miss-mississippi/alakazam), archived as [doi:10.5281/zenodo.23053936](https://doi.org/10.5281/zenodo.23053936)
 **Status:** the model is complete, 37<!--=checks.total:.0f--> automated checks pass, the experimental part is designed
 **Version 2:** errors found in review are fixed (section 18.2); the main result is recomputed
 **Version 2.1:** the heat of oxidation and boiling at the side-band pressure are added as sensitivity axes (sections 9.5, 12); the baseline is unchanged

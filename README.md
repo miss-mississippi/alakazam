@@ -2,6 +2,7 @@
 
 [![tests](https://github.com/miss-mississippi/alakazam/actions/workflows/tests.yml/badge.svg)](https://github.com/miss-mississippi/alakazam/actions/workflows/tests.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23053936.svg)](https://doi.org/10.5281/zenodo.23053936)
 ![python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 
 > **Status: work in progress.** Not peer-reviewed; numbers may change between versions.
@@ -130,6 +131,10 @@ resistivity; breakup altitudes are inputs, not results. The full list is in
 [section 15 of the report](docs/REPORT.md#15-full-list-of-assumptions).
 
 ## How to cite
+
+The code is archived on Zenodo: [10.5281/zenodo.23053936](https://doi.org/10.5281/zenodo.23053936) cites all versions
+and always resolves to the latest one. To cite a specific version, use its own DOI,
+e.g. v2.1.0: [10.5281/zenodo.23053937](https://doi.org/10.5281/zenodo.23053937).
 
 Citation metadata is in [CITATION.cff](CITATION.cff) (GitHub shows it through the
 "Cite this repository" button).
