@@ -1,4 +1,4 @@
-# alakazam: aluminium injected into the mesosphere by re-entering satellites
+# ALAKAZAM: aluminium injected into the mesosphere by re-entering satellites
 
 [![tests](https://github.com/miss-mississippi/alakazam/actions/workflows/tests.yml/badge.svg)](https://github.com/miss-mississippi/alakazam/actions/workflows/tests.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -7,8 +7,10 @@
 
 > **Status: work in progress.** Not peer-reviewed; numbers may change between versions.
 
-A satellite re-entry and ablation model that estimates **how much aluminium
-evaporates during atmospheric entry and at which altitudes it is injected**.
+**ALAKAZAM** (**AL**uminium **A**blation **K**inetics **A**nd **Z**-resolved
+**A**tmospheric injection **M**odel) is a satellite re-entry and ablation model that
+estimates **how much aluminium evaporates during atmospheric entry and at which
+altitudes (z) it is injected**.
 Standard demise-analysis tools (DRAMA/SESAM, ORSAT) do not give this number: they
 were built to assess the risk to people on the ground, and their demise criterion
 is melting. Atmospheric chemistry needs the vapour.

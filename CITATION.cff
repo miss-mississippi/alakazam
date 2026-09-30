@@ -1,13 +1,13 @@
 cff-version: 1.2.0
 message: "If you use this model or its results, please cite it as below."
-title: "alakazam: aluminium injection into the mesosphere from satellite re-entry"
+title: "ALAKAZAM: ALuminium Ablation Kinetics And Z-resolved Atmospheric injection Model"
 type: software
 abstract: >-
-  Re-entry and ablation model that estimates how much aluminium a satellite
-  evaporates during atmospheric entry and at which altitudes it is injected,
-  with boiling at the local stagnation pressure, temperature-dependent
-  emissivity of oxidised and bare aluminium, and automated checks that keep
-  the reported numbers in sync with the code.
+  ALAKAZAM is a re-entry and ablation model that estimates how much aluminium
+  a satellite evaporates during atmospheric entry and at which altitudes it is
+  injected into the mesosphere, with boiling at the local stagnation pressure,
+  temperature-dependent emissivity of oxidised and bare aluminium, and
+  automated checks that keep the reported numbers in sync with the code.
 authors:
   - family-names: Orazbay
     given-names: Beknur
@@ -23,7 +23,7 @@ identifiers:
   - type: doi
     value: 10.5281/zenodo.23053937
     description: "Version 2.1.0"
-version: 2.1.0
+version: 2.1.1
 date-released: 2026-09-30
 keywords:
   - atmospheric reentry

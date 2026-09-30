@@ -1,4 +1,6 @@
-# Aluminium injection into the mesosphere by re-entering satellites: full report
+# ALAKAZAM: aluminium injection into the mesosphere by re-entering satellites
+
+Full report on **ALAKAZAM**, the **AL**uminium **A**blation **K**inetics **A**nd **Z**-resolved **A**tmospheric injection **M**odel. The name lists the two outputs: how much aluminium is ablated, and at which altitude z it enters the atmosphere (the report writes altitude as h).
 
 **Author:** Beknur Orazbay ([ORCID 0009-0004-1983-3413](https://orcid.org/0009-0004-1983-3413)), Nazarbayev University
 **Period of work:** September 2026
@@ -6,6 +8,7 @@
 **Status:** work in progress, not peer-reviewed; 37<!--=checks.total:.0f--> automated checks pass; the experimental part is designed
 **Version 2:** errors found in review are fixed (section 18.2); the main result is recomputed
 **Version 2.1:** the heat of oxidation and boiling at the side-band pressure are added as sensitivity axes (sections 9.5, 12); the baseline is unchanged
+**Version 2.1.1:** the model is named ALAKAZAM; wording and citation metadata tidied; no change to any number
 
 ---
 
