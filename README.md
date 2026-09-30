@@ -137,7 +137,7 @@ electrical resistivity; breakup altitudes are inputs, not results. The full list
 
 The code is archived on Zenodo: [10.5281/zenodo.23053936](https://doi.org/10.5281/zenodo.23053936) cites all versions
 and always resolves to the latest one. To cite a specific version, use its own DOI,
-e.g. v2.1.0: [10.5281/zenodo.23053937](https://doi.org/10.5281/zenodo.23053937).
+e.g. v2.1.1: [10.5281/zenodo.23055514](https://doi.org/10.5281/zenodo.23055514).
 
 Citation metadata is in [CITATION.cff](CITATION.cff) (GitHub shows it through the
 "Cite this repository" button).
