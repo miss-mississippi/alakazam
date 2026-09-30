@@ -4,6 +4,8 @@
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
 
+> **Status: work in progress.** Not peer-reviewed; numbers may change between versions.
+
 A satellite re-entry and ablation model that estimates **how much aluminium
 evaporates during atmospheric entry and at which altitudes it is injected**.
 Standard demise-analysis tools (DRAMA/SESAM, ORSAT) do not give this number: they
@@ -51,7 +53,7 @@ which no current model resolves.
    68–83 km window the injection median is ≈ 75.9<!--=step5b.transfer.intercept78:.1f--> + 0.82<!--=step5b.transfer.gain_mid:.2f-->·(H − 78) km; at a fixed H
    the offset is +1.7<!--=step5b.offsets.min:+.1f-->…+2.8<!--=step5b.offsets.max:+.1f--> km across all other parameters.
 6. **Comparison with Ferreira et al. 2024: order-of-magnitude agreement.** They
-   oxidise 32<!--=step5.ferreira.theirs.pct:.0f-->% of the Al (molecular dynamics); we evaporate 16<!--=step5.ferreira.film_uniform.pct:.0f-->–23<!--=step5.ferreira.bare_uniform.pct:.0f-->% with uniform Al
+   oxidise 32<!--=step5.ferreira.theirs.pct:.0f-->% of the Al (molecular dynamics, their Section 3.3); we evaporate 16<!--=step5.ferreira.film_uniform.pct:.0f-->–23<!--=step5.ferreira.bare_uniform.pct:.0f-->% with uniform Al
    and 32<!--=step5.ferreira.film_thin.pct:.0f-->–46<!--=step5.ferreira.bare_thin.pct:.0f-->% if the Al is concentrated in thin-walled parts.
 7. **Experiment.** The emissivity of oxidised Al can be obtained from room-temperature
    reflectance, but mid-IR in full hemispherical geometry (a gold integrating

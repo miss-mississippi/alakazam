@@ -1003,9 +1003,11 @@ This reorders the priorities: **the main altitude uncertainty lies in the observ
 
 ### 11.1 What Ferreira actually computed
 
-Ferreira et al. 2024 (GRL, 10.1029/2024GL109280): a 250 kg satellite, 30% Al = 75 kg Al. Molecular dynamics of Al oxidation in oxygen at 2200 K at an altitude of 86 km, with the result scaled up to the satellite by similarity. Outcome: **24.0 kg Al is oxidised (32%)**, forming 29.8 kg of AlO clusters; 51.0 kg Al remain as unoxidised clusters. All of the Al is assumed to be ablated.
+Ferreira et al. 2024 (GRL, 10.1029/2024GL109280): a 250 kg satellite, 30% Al = 75 kg Al. Molecular dynamics of Al oxidation in oxygen at 2200 K at an altitude of 86 km (the set-up next to their Figure 1a), with the result scaled up to the satellite through the atom counts of the clusters in their Table 1b. Outcome (their Section 3.3, "Full-Scale and Long-Term Extrapolation", p. 8, and Section 4): **24.0 kg of Al is oxidised (32%)**, into 29.8 kg of oxide clusters; 51.0 kg of Al remain as unoxidised clusters. All of the Al is assumed to be ablated.
 
-So 32% is an **output of their model**, not an assumption, and it is computed for AlO clusters, not for Al₂O₃.
+So 32% is an **output of their model**, not an assumption.
+
+**What the clusters are.** The paper calls them "AlO particles", but that is a label, not a 1:1 formula. Stoichiometric AlO from 24.0 kg of Al would weigh 38.2 kg, and Al₂O₃ 45.3 kg. The 29.8 kg correspond to 5.8 kg of oxygen, O/Al ≈ 0.4 by atoms: aluminium-rich AlₓOᵧ, consistent with the paper's own description of an oxygen-deficient reaction and an "aluminum-rich" cluster (their Figure 1c). The comparison below is made in kilograms of **aluminium** (24.0 kg, 32%), so the cluster stoichiometry does not enter it.
 
 **The first version's error.** The report took "~30 kg Al₂O₃", converted it to Al using the mass fraction of Al in Al₂O₃ (0.529) and got 15.9 kg Al = 21%. Correct: 24.0 kg Al = 32%. Besides, in one place the first version called Ferreira's yield "an assumption" and in another "an output of molecular dynamics"; the second is right.
 
@@ -1501,7 +1503,8 @@ Numerical defects found along the way:
 | **Bare-melt ε of 0.05**, the value for polished solid Al | estimate from the resistivity of liquid Al | the "film / no film" scenarios seemed 2–3.5 times apart, in fact 1.4 |
 | **The solid Al₂O₃ curve extended to 2740 K**, above its melting point (2345 K) | review | removed: the working temperature is ~2000 K |
 | **All fragments are aluminium, ×0.30 uniformly**, without being listed in the assumptions | code review | the strongest mass axis was invisible |
-| **Ferreira: 21% instead of 32%**, AlO converted as Al₂O₃; "assumption" vs "MD" | reading the paper | the comparison and its interpretation ("ε ≈ 0.12, τ ≈ 300 s") were wrong |
+| **Ferreira: 21% instead of 32%**, the ~30 kg of oxide clusters converted as if they were Al₂O₃; "assumption" vs "MD" | reading the paper | the comparison and its interpretation ("ε ≈ 0.12, τ ≈ 300 s") were wrong |
+| **Ferreira's clusters called AlO**, as if 1:1 | external review: 29.8 kg from 24.0 kg of Al means O/Al ≈ 0.4; checked against the paper (Section 3.3, Table 1b) | wording only: the comparison is in kg of Al; the place in the paper is now cited |
 | **The 95% demisability was compared with the 3% vaporizable fraction** | review: 95% is a melt criterion | "a thirtyfold gap" instead of ~2× |
 | **Steps 1–2 did not reproduce**: `earth_rotation=True` became the default in step 3 | running verify_step1: 44.94 km instead of 45.32 | the numbers in section 3 did not match the code |
 | **c_p = 900 for the liquid and T_melt = 933 K for the alloy** | review of the properties | the enthalpy to boiling was underestimated by ~24%; the 3.4% match with ORSAT was a cancellation of errors |
@@ -1647,7 +1650,7 @@ Git history: one commit per step and per major revision. What was corrected duri
 - Emmert J.T. et al. *NRLMSIS 2.1: An empirical model of nitric oxide incorporated into MSIS.* JGR Space Physics 127, e2022JA030896, 2022.
 - Lips T. et al. *Equivalent re-entry breakup altitude and fragment list.* 6th European Conference on Space Debris (SESAM: panels at 95 km, body at 78 km).
 - Ferreira J.P. *Space Debris Demise in the Atmosphere: The case of Aluminum.* UNOOSA/IAF, 2024 (observations: ATV-1 74 km, Cygnus OA6 70 km, Cluster II SALSA 80 km; demisability of an OneWeb/SpaceX-type design 95%).
-- Ferreira J.P., Huang Z., Nomura K., Wang J. *Potential ozone depletion from satellite demise during atmospheric reentry in the era of mega-constellations.* Geophysical Research Letters 51, e2024GL109280, 2024 (24.0 kg of the 75 kg Al oxidised to AlO, 32%).
+- Ferreira J.P., Huang Z., Nomura K., Wang J. *Potential ozone depletion from satellite demise during atmospheric reentry in the era of mega-constellations.* Geophysical Research Letters 51, e2024GL109280, 2024 (Section 3.3 and Section 4: 24.0 kg of the 75 kg Al oxidised, 32%, into 29.8 kg of Al-rich oxide clusters labelled "AlO"; atom counts in Table 1b; MD set-up at 2,200 K and 86 km next to Figure 1a).
 - Barker et al. Earth's Future, 2026 (title and DOI to be confirmed).
 - Maloney et al. *Investigating the potential atmospheric accumulation and radiative impact of the coming increase in satellite reentry frequency.* JGR: Atmospheres, 2025.
 - NASA ODPO, ORSAT; Kelley R.L., Jarkey D.R. *CubeSat material limits for design for demise*, NTRS 20140016958 (heat of ablation for generic aluminum 934.5 kJ/kg).

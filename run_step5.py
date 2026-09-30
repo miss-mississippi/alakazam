@@ -386,10 +386,12 @@ def report_oxidation(frags):
 
 def report_ferreira(runs):
     print("D. COMPARISON WITH FERREIRA et al. 2024 (GRL, 10.1029/2024GL109280)")
-    print("   Theirs: 250 kg, 30% Al = 75 kg Al. Their oxidation MD oxidises")
-    print("   24.0 kg Al (32%), forming 29.8 kg of AlO clusters; 51.0 kg Al")
-    print("   remain as unoxidised clusters. So 32% is an OUTPUT OF THEIR MODEL,")
-    print("   not an assumption, and it is computed at 2200 K, 86 km.")
+    print("   Theirs (Section 3.3 and Section 4, atom counts in Table 1b): 250 kg,")
+    print("   30% Al = 75 kg Al. Their oxidation MD oxidises 24.0 kg Al (32%) into")
+    print("   29.8 kg of Al-rich oxide clusters (labelled 'AlO'; the masses give")
+    print("   O/Al ~ 0.4); 51.0 kg Al remain as unoxidised clusters. So 32% is an")
+    print("   OUTPUT OF THEIR MODEL, not an assumption, computed at 2200 K, 86 km.")
+    print("   The comparison is in kg of Al, so the cluster formula does not enter.")
     f_ferr = 24.0 / 75.0
     print(f"   In our normalization (52.5 kg Al): {f_ferr*M_AL_TOTAL:.1f} kg Al "
           f"to oxide, {24.0/250:.3f} kg Al per kg of satellite.\n")
