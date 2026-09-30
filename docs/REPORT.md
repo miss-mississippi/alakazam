@@ -1,6 +1,6 @@
 # Aluminium injection into the mesosphere by re-entering satellites: full report
 
-**Author:** Beknur Orazbay, Nazarbayev University
+**Author:** Beknur Orazbay ([ORCID 0009-0004-1983-3413](https://orcid.org/0009-0004-1983-3413)), Nazarbayev University
 **Period of work:** September 2026
 **Code:** Python (numpy, scipy, matplotlib, pymsis), repository [alakazam](https://github.com/miss-mississippi/alakazam)
 **Status:** the model is complete, 37<!--=checks.total:.0f--> automated checks pass, the experimental part is designed

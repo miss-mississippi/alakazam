@@ -12,6 +12,7 @@ authors:
   - family-names: Orazbay
     given-names: Beknur
     affiliation: Nazarbayev University
+    orcid: "https://orcid.org/0009-0004-1983-3413"
 repository-code: "https://github.com/miss-mississippi/alakazam"
 license: MIT
 version: 2.1.0
