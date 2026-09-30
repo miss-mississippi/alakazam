@@ -53,6 +53,34 @@ RHO_ALUMINIUM = 2700.0   # kg/m^3
 # result (verify_step4).
 TAU_FLASH = 0.2          # s
 
+# OXIDATION HEAT: a sensitivity axis, off in the baseline.
+# Oxygen reaches the surface by diffusion through the boundary layer. With a
+# Lewis number of 1 the Reynolds analogy gives one transfer coefficient
+# C = q_cold/h_0 for heat and mass, so the oxygen flux to the wall is at most
+# Y_O * q_cold/h_0. If all of it reacts at the wall, the heat release is
+# DH_OX_PER_KG_O per kilogram of O, i.e. q_ox/q_hot-wall = Y_O*DH/(h_0 - h_w):
+# 0.31 at 7.5 km/s and 0.43 at 6.5 km/s. This is an UPPER BOUND: part of the
+# reaction happens in the gas (the Al vapour burns in the boundary layer and
+# the heat is carried off by the flow), and the oxide skin slows the rest.
+Y_O_AIR = 0.2314                            # mass fraction of O in air (well mixed below ~100 km)
+M_O = 0.015999                              # kg/mol
+DH_OX_PER_KG_O = 1675.7e3 / (3 * M_O)       # 2Al + 3/2 O2 -> Al2O3, -1675.7 kJ/mol (NIST-JANAF): 34.9 MJ/kg O
+AL_PER_KG_O = 2 * M_AL / (3 * M_O)          # 1.124 kg of Al oxidized per kg of O
+
+
+def oxidation_heat_ratio(V, T_wall: float, eta: float = 1.0):
+    """q_ox / q_hot-wall for oxygen supplied at the diffusion limit.
+
+        q_ox / q_hw = eta * Y_O * DH_OX / (h_0 - h_w)
+
+    Independent of altitude and fragment size (both cancel in the transfer
+    coefficient), but it grows as the body slows down because h_0 = V^2/2
+    falls while the heat release per kilogram of oxygen does not.
+    """
+    V = np.asarray(V, dtype=float)
+    dh = np.maximum(0.5 * V ** 2 - CP_AIR_HOT * T_wall, 1e-9)
+    return eta * Y_O_AIR * DH_OX_PER_KG_O / dh
+
 
 @dataclass
 class Aluminium:
@@ -284,6 +312,8 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
                           correlation: str = "sutton-graves",
                           flux_mode: str = "cos",
                           blowing_eta: float = 0.0,
+                          oxidation_eta: float = 0.0,
+                          boil_pressure: str = "stagnation",
                           n_out: int = 1200) -> dict:
     """Per-band energy balance over the angular flux distribution.
 
@@ -316,6 +346,21 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
 
     blowing_eta: flux blockage by vapour injection in boiling bands,
       q_vap = (q_in - rad) / (1 + eta*(h_0 - h_w)/L). 0 disables it (baseline).
+
+    oxidation_eta: heat of Al oxidation as a fraction of the diffusion limit
+      (see oxidation_heat_ratio). A band gets
+          q_ox = eta * Y_O * DH_OX * q_cold * cos(theta) / h_0
+      on its MOLTEN part only: solid Al is passivated by its own oxide. 0 (the
+      baseline) switches it off, 1 is the upper bound where every oxygen atom
+      that reaches the wall reacts there. The Al this would consume is
+      reported as m_ox_al but NOT removed from the bands, so the evaporated
+      mass stays an upper bound too.
+
+    boil_pressure: "stagnation" (baseline) boils every band at the
+      stagnation-point pressure p0. "local" uses the Newtonian surface
+      pressure p0*cos^2(theta) of each band, so the side bands boil at a lower
+      temperature; the baseline therefore underestimates evaporation. Only
+      for flux_mode="cos".
 
     Wall thickness: the plate thickness for a plate; for a compact fragment an
     equivalent shell m/(rho*A_wet). Capped by the penetration depth.
@@ -351,6 +396,13 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
     else:
         raise ValueError(f"flux_mode: {flux_mode!r}")
 
+    if boil_pressure == "stagnation":
+        p_frac = None
+    elif boil_pressure == "local" and flux_mode == "cos":
+        p_frac = flux_frac ** 2                 # Newtonian p0*cos^2(theta)
+    else:
+        raise ValueError(f"boil_pressure: {boil_pressure!r} with flux_mode {flux_mode!r}")
+
     t_eff = min(wall_thickness, depth)          # participating thickness
     lumped_valid = wall_thickness <= depth
     dA = heated_area / n_bands
@@ -362,9 +414,15 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
     def rhs(t, y):
         h_s = y[:n]
         m_v = y[n:2 * n]
-        T_b = float(mat.T_boil_at(np.exp(float(lnp_spline(t)))))
-        L_v = float(mat.L_vapour_at(T_b))
-        h3 = float(mat.h3(T_b))
+        p0 = np.exp(float(lnp_spline(t)))
+        if p_frac is None:
+            T_b = float(mat.T_boil_at(p0))
+            L_v = float(mat.L_vapour_at(T_b))
+            h3 = float(mat.h3(T_b))
+        else:
+            T_b = mat.T_boil_at(p0 * p_frac)
+            L_v = mat.L_vapour_at(T_b)
+            h3 = mat.h3(T_b)
         T = temperature_from_enthalpy(h_s, mat, T_b)
         V_now = float(V_spline(t))
         q = max(float(q_spline(t)), 0.0) * hot_wall_factor(V_now, T)
@@ -373,6 +431,12 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
         # A boiled-off band disappears. Smoothed over 1% of the band mass.
         alive = np.clip((m_band - m_v) / (0.01 * m_band), 0.0, 1.0)
         q_in = q * flux_frac * alive
+        if oxidation_eta:
+            # Diffusion-limited oxygen supply; only the molten part reacts.
+            g_melt = np.clip((h_s - h1) / mat.L_fusion, 0.0, 1.0)
+            q_cold = max(float(q_spline(t)), 0.0)
+            q_in = q_in + (oxidation_eta * Y_O_AIR * DH_OX_PER_KG_O * q_cold
+                           / (0.5 * V_now ** 2)) * flux_frac * g_melt * alive
         rad = sides * eps * SIGMA_SB * T ** 4 * alive
         net = q_in - rad
 
@@ -387,7 +451,7 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
         neg = np.minimum(net, 0.0)
 
         # Blowing: part of the excess flux in a boiling band is blocked by vapour.
-        dh_gas = max(0.5 * V_now ** 2 - CP_AIR_HOT * T_b, 0.0)
+        dh_gas = np.maximum(0.5 * V_now ** 2 - CP_AIR_HOT * T_b, 0.0)
         evap = w * pos / (1.0 + blowing_eta * dh_gas / L_v)
         block = w * pos - evap
 
@@ -430,6 +494,19 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
 
     m_melt = float(m_melt_band.sum())
     m_vap = float(m_vap_band.sum())
+
+    # Oxidation diagnostics from the saved solution: the oxygen taken up at
+    # the wall, its heat (already inside E_in) and the Al it would oxidize.
+    E_ox = m_ox_al = 0.0
+    if oxidation_eta:
+        ts = sol.t
+        mO_coef = oxidation_eta * Y_O_AIR * np.maximum(q_spline(ts), 0.0) / (0.5 * V_spline(ts) ** 2)
+        g_melt = np.clip((H - h1) / mat.L_fusion, 0.0, 1.0)
+        alive_s = np.clip((m_band - MV) / (0.01 * m_band), 0.0, 1.0)
+        mO_rate = (flux_frac[:, None] * g_melt * alive_s).sum(axis=0) * mO_coef * dA
+        m_O = float(np.trapezoid(mO_rate, ts))
+        E_ox = DH_OX_PER_KG_O * m_O
+        m_ox_al = AL_PER_KG_O * m_O
     return {
         "m_melt": m_melt, "m_vap": m_vap,
         "f_melt": m_melt / vehicle.mass, "f_vap": m_vap / vehicle.mass,
@@ -443,4 +520,5 @@ def surface_thermal_model(traj, vehicle, material: Aluminium,
         "p_stag": p_series, "T_boil": Tb_series,
         "E_in": E_in, "E_rad": E_rad, "E_stored": E_stored, "E_vap": E_vap,
         "E_block": E_block, "energy_residual": residual,
+        "E_ox": E_ox, "m_ox_al": m_ox_al,
     }

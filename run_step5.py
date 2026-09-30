@@ -16,7 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from reentry import EntryState, MSISAtmosphere, Vehicle, integrate
-from reentry.ablation import Aluminium, surface_thermal_model
+from reentry.ablation import Aluminium, oxidation_heat_ratio, surface_thermal_model
 from reentry.results import Recorder
 from reentry.emissivity import (LAM_GRID, bare_aluminium_emissivity, eps_film,
                                 fit_film_edge, oxide_film_emissivity,
@@ -84,6 +84,8 @@ SENS_KEY = {
     "thin-walled mass fraction 25-75%": "thin_fraction",
     "entry angle -1...-3°": "entry_angle",
     "orbit inclination 0-180°": "inclination",
+    "oxidation heat, eta 0-1 (upper bound)": "oxidation",
+    "boiling at local pressure p0*cos^2": "side_pressure",
 }
 R = Recorder("step5")
 
@@ -114,10 +116,11 @@ def run_model(frags, mat: Aluminium, al_split=BASE_SPLIT, **model_kw) -> dict:
     (altitude, kg Al); both the histogram and the median are computed from it.
     """
     hs, dms, per = [], [], []
-    melt_al = 0.0
+    melt_al = ox_al = 0.0
     for (name, veh, tr, t_wall), f_al in zip(frags, al_split):
         r = surface_thermal_model(tr, veh, mat, wall_thickness=t_wall, **model_kw)
         melt_al += r["m_melt"] * f_al
+        ox_al += r["m_ox_al"] * f_al
         hs.append(r["h"][:-1] / 1e3)
         dms.append(np.diff(r["m_vap_series"]) * f_al)
         per.append((name, veh, tr, r, f_al))
@@ -125,7 +128,7 @@ def run_model(frags, mat: Aluminium, al_split=BASE_SPLIT, **model_kw) -> dict:
     dm = np.concatenate(dms)
     order = np.argsort(h)
     return dict(h=h[order], dm=dm[order], total=float(dm.sum()),
-                melt=melt_al, per=per)
+                melt=melt_al, ox=ox_al, per=per)
 
 
 def histogram(run: dict) -> np.ndarray:
@@ -310,6 +313,10 @@ def report_sensitivity(frags):
         [run_model(build_fragments(entry=EntryState(gamma_deg=-1.5,
                                                     inclination_deg=i)), BASE)
          for i in (0.0, 180.0)])
+    add("oxidation heat, eta 0-1 (upper bound)",
+        [run_model(frags, BASE, oxidation_eta=e) for e in (0.0, 1.0)])
+    add("boiling at local pressure p0*cos^2",
+        [run_model(frags, BASE, boil_pressure=b) for b in ("stagnation", "local")])
 
     print(f"   {'factor':<38}{'Al, kg: from':>13}{'to':>7}{'ratio':>7}{'median, km':>12}")
     for label, lo, hi, dmed in sorted(rows, key=lambda r: -(r[2] - r[1])):
@@ -329,6 +336,52 @@ def report_sensitivity(frags):
     R["film_shape.eps2000_min"] = lo_shape[1]
     R["film_shape.eps2000_max"] = hi_shape[1]
     return rows, base
+
+
+def report_oxidation(frags):
+    """Two effects left out of the baseline, both of which ADD evaporation."""
+    print("E. HEAT OF OXIDATION AND BOILING ON THE SIDE BANDS")
+    print("   Oxygen reaches the surface by diffusion through the boundary layer.")
+    print("   With Le = 1 its flux is at most Y_O*q_cold/h_0; if all of it reacts at")
+    print("   the wall, q_ox/q_hw = Y_O*DH_ox/(h_0 - h_w), independent of altitude")
+    print("   and size but growing as the body slows down:\n")
+    Tw = Aluminium().T_boil_nominal
+    print(f"   {'V, m/s':>8}{'q_ox/q_hw':>11}   (T_wall = {Tw:.0f} K)")
+    for V in (7500.0, 7000.0, 6500.0, 6000.0):
+        ratio = float(oxidation_heat_ratio(V, Tw))
+        R[f"oxidation.ratio.V{V:.0f}"] = ratio
+        print(f"   {V:>8.0f}{ratio:>11.2f}")
+    print("\n   eta is the fraction of that oxygen that reacts at the wall; only the")
+    print("   molten part of a band oxidizes. eta = 1 is the upper bound.\n")
+    print(f"   {'scenario':<19}{'eta':>5}{'evap. Al, kg':>14}{'x base':>8}"
+          f"{'median, km':>12}{'Al oxidized at wall, kg':>25}")
+    for name, mat in SCENARIOS.items():
+        base = None
+        for eta in (0.0, 0.5, 1.0):
+            run = run_model(frags, mat, oxidation_eta=eta)
+            s = summarize(run)
+            base = base or s["total"]
+            k = f"oxidation.{SCEN_KEY[name]}.eta{round(eta*100):03d}"
+            R[f"{k}.total"] = s["total"]
+            R[f"{k}.factor"] = s["total"] / base
+            R[f"{k}.median"] = s["median"]
+            R[f"{k}.ox_al"] = run["ox"]
+            print(f"   {name:<19}{eta:>5.1f}{s['total']:>14.1f}{s['total']/base:>8.2f}"
+                  f"{s['median']:>12.1f}{run['ox']:>25.1f}")
+    print("\n   The Al oxidized at the wall is a diagnostic: it is not removed from")
+    print("   the fragments, so the evaporated mass stays an upper bound.")
+    print("\n   Boiling at the local Newtonian pressure p0*cos^2(theta) instead of the")
+    print("   stagnation pressure everywhere:")
+    for name, mat in SCENARIOS.items():
+        s0 = summarize(run_model(frags, mat))
+        s = summarize(run_model(frags, mat, boil_pressure="local"))
+        k = f"side_pressure.{SCEN_KEY[name]}"
+        R[f"{k}.total"] = s["total"]
+        R[f"{k}.change_pct"] = 100 * (s["total"] / s0["total"] - 1)
+        R[f"{k}.median"] = s["median"]
+        print(f"   {name:<19}{s0['total']:>6.1f} -> {s['total']:.1f} kg "
+              f"({100*(s['total']/s0['total']-1):+.0f}%), median {s['median']:.1f} km")
+    print("   The baseline (stagnation pressure everywhere) is the conservative side.\n")
 
 
 def report_ferreira(runs):
@@ -550,6 +603,7 @@ if __name__ == "__main__":
     frags, scen, sweep = report_main()
     report_changes(frags)
     rows, base = report_sensitivity(frags)
+    report_oxidation(frags)
     report_ferreira({"frags": frags})
     report_experiment()
     figure_main({"scen": scen}, sweep)

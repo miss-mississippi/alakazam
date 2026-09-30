@@ -96,7 +96,8 @@ def test_band_convergence():
 
 def test_energy_balance():
     print("4. ENERGY BALANCE OF THE PER-BAND MODEL")
-    print("   Input = re-radiation + storage + evaporation + blocked by blowing.")
+    print("   Input (incl. oxidation heat) = re-radiation + storage + evaporation")
+    print("   + blocked by blowing.")
     print("   The strongest test: it catches any error in the right-hand side.")
     print("   The audit is accumulated INSIDE the same ODE system, not recomputed")
     print("   separately; otherwise the test would check a copy of the code.\n")
@@ -104,19 +105,26 @@ def test_energy_balance():
     for label, veh, tw, kw in (("whole object", INTACT, None, {}),
                                ("1 mm plate", THIN, 1e-3, {}),
                                ("1 mm plate, blowing 0.6", THIN, 1e-3,
-                                dict(blowing_eta=0.6))):
+                                dict(blowing_eta=0.6)),
+                               ("1 mm plate, oxidation 1.0", THIN, 1e-3,
+                                dict(oxidation_eta=1.0)),
+                               ("1 mm plate, local boiling", THIN, 1e-3,
+                                dict(boil_pressure="local"))):
         tr = integrate(veh, ENTRY, ATM)
         for e in (0.05, 0.20):
             r = surface_thermal_model(tr, veh, Aluminium(emissivity=e),
                                       wall_thickness=tw, **kw)
             print(f"   {label}, eps={e:.2f}:")
-            print(f"     input        {r['E_in']:.4e} J")
+            print(f"     input        {r['E_in']:.4e} J"
+                  + (f"  (of which oxidation {r['E_ox']:.4e})" if r["E_ox"] else ""))
             print(f"     radiated     {r['E_rad']:.4e}")
             print(f"     stored       {r['E_stored']:.4e}")
             print(f"     evaporation  {r['E_vap']:.4e}")
             print(f"     blocked      {r['E_block']:.4e}")
             print(f"     residual     {r['energy_residual']:+.2e}")
             ok &= abs(r["energy_residual"]) < 1e-6
+            if kw.get("oxidation_eta"):
+                ok &= r["E_ox"] > 0
             worst = max(abs(r["energy_residual"]), R.data.get("energy_residual_max", 0.0))
             R["energy_residual_max"] = worst
     print(f"\n   -> {'OK' if ok else 'FAIL'}\n")
