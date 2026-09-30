@@ -3,7 +3,7 @@
 **Author:** Beknur Orazbay ([ORCID 0009-0004-1983-3413](https://orcid.org/0009-0004-1983-3413)), Nazarbayev University
 **Period of work:** September 2026
 **Code:** Python (numpy, scipy, matplotlib, pymsis), repository [alakazam](https://github.com/miss-mississippi/alakazam), archived as [doi:10.5281/zenodo.23053936](https://doi.org/10.5281/zenodo.23053936)
-**Status:** the model is complete, 37<!--=checks.total:.0f--> automated checks pass, the experimental part is designed
+**Status:** work in progress, not peer-reviewed; 37<!--=checks.total:.0f--> automated checks pass; the experimental part is designed
 **Version 2:** errors found in review are fixed (section 18.2); the main result is recomputed
 **Version 2.1:** the heat of oxidation and boiling at the side-band pressure are added as sensitivity axes (sections 9.5, 12); the baseline is unchanged
 
@@ -920,7 +920,7 @@ At η = 1 this is 0.23 · 35 / 27 ≈ 0.3 at orbital speed. The ratio does not d
 
 In the model (`oxidation_eta`) each band gets this extra input on its **molten** part only: solid aluminium is passivated by its own oxide. The Al that the oxygen would consume is reported separately and **not** removed from the fragments, so the evaporated mass stays an upper bound.
 
-| scenario | η | Al evaporated, kg | × baseline | median, km | Al oxidized at the wall, kg |
+| scenario | η | Al evaporated, kg | × baseline | median, km | Al oxidised at the wall, kg |
 |---|---|---|---|---|---|
 | active oxide film | 0 (baseline) | 8.5<!--=step5.oxidation.film.eta000.total:.1f--> | 1.00 | 76.1<!--=step5.oxidation.film.eta000.median:.1f--> | — |
 | active oxide film | 0.5 | 12.6<!--=step5.oxidation.film.eta050.total:.1f--> | 1.48<!--=step5.oxidation.film.eta050.factor:.2f--> | 75.9<!--=step5.oxidation.film.eta050.median:.1f--> | 5.2<!--=step5.oxidation.film.eta050.ox_al:.1f--> |

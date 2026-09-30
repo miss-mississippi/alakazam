@@ -44,19 +44,20 @@ which no current model resolves.
 3. **The surface state is not the main uncertainty.** The "film" and "bare melt"
    scenarios differ by a factor of 1.4<!--=step5.scenarios.ratio:.1f-->: at ~2000 K the film emissivity is
    pinned by the α-Al₂O₃ reference point, and the liquid metal's is already ~0.17.
-   The heat of Al oxidation, left out of the baseline, can add up to ×1.8<!--=step5.sensitivity.oxidation.ratio:.1f-->
-   at the diffusion limit of the oxygen supply, and boiling at the lower side-band
-   pressure adds 17<!--=step5.side_pressure.film.change_pct:.0f-->%; neither moves the injection altitude.
 4. **The mass is set by where the aluminium sits.** At the same 30% fraction, the
    distribution of Al over fragments gives 0<!--=step5.sensitivity.al_split.lo:.0f-->–17<!--=step5.sensitivity.al_split.hi:.0f--> kg, a thin-walled mass fraction
    of 25–75% gives 4.3<!--=step5.sensitivity.thin_fraction.lo:.1f-->–13.1<!--=step5.sensitivity.thin_fraction.hi:.1f--> kg, and a breakup altitude of ±10 km gives 4.4<!--=step5.sensitivity.breakup.lo:.1f-->–11.1<!--=step5.sensitivity.breakup.hi:.1f--> kg.
-5. **The injection altitude is inherited from the breakup altitude H.** In the
+5. **Two effects left out of the baseline can only add vapour.** The heat of Al
+   oxidation gives up to ×1.8<!--=step5.sensitivity.oxidation.ratio:.1f--> at the diffusion limit of the oxygen supply, and
+   boiling at the lower pressure on the sides of a fragment adds 17<!--=step5.side_pressure.film.change_pct:.0f-->%. Neither
+   moves the injection altitude.
+6. **The injection altitude is inherited from the breakup altitude H.** In the
    68–83 km window the injection median is ≈ 75.9<!--=step5b.transfer.intercept78:.1f--> + 0.82<!--=step5b.transfer.gain_mid:.2f-->·(H − 78) km; at a fixed H
    the offset is +1.7<!--=step5b.offsets.min:+.1f-->…+2.8<!--=step5b.offsets.max:+.1f--> km across all other parameters.
-6. **Comparison with Ferreira et al. 2024: order-of-magnitude agreement.** They
+7. **Comparison with Ferreira et al. 2024: order-of-magnitude agreement.** They
    oxidise 32<!--=step5.ferreira.theirs.pct:.0f-->% of the Al (molecular dynamics, their Section 3.3); we evaporate 16<!--=step5.ferreira.film_uniform.pct:.0f-->–23<!--=step5.ferreira.bare_uniform.pct:.0f-->% with uniform Al
    and 32<!--=step5.ferreira.film_thin.pct:.0f-->–46<!--=step5.ferreira.bare_thin.pct:.0f-->% if the Al is concentrated in thin-walled parts.
-7. **Experiment.** The emissivity of oxidised Al can be obtained from room-temperature
+8. **Experiment.** The emissivity of oxidised Al can be obtained from room-temperature
    reflectance, but mid-IR in full hemispherical geometry (a gold integrating
    sphere) is required: without it the error is −84<!--=step5b.no_midir.T2000.err_pct:.0f-->%.
 
@@ -125,9 +126,9 @@ alakazam/
 
 Stable fragment orientation (the fast-tumbling limit is checked separately); three
 fragment classes, each treated thermally as aluminium; the melt stays on the
-fragment until it boils; vapour blowing and the heat of oxidation are not in the
-base case but are sensitivity axes; the emissivity of bare liquid Al is estimated from electrical
-resistivity; breakup altitudes are inputs, not results. The full list is in
+fragment until it boils; vapour blowing and the heat of oxidation are sensitivity
+axes, not part of the base case; the emissivity of bare liquid Al is estimated from
+electrical resistivity; breakup altitudes are inputs, not results. The full list is in
 [section 15 of the report](docs/REPORT.md#15-full-list-of-assumptions).
 
 ## How to cite

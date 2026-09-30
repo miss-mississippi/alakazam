@@ -1,12 +1,12 @@
 cff-version: 1.2.0
 message: "If you use this model or its results, please cite it as below."
-title: "alakazam: aluminium injection into the mesosphere from satellite reentry"
+title: "alakazam: aluminium injection into the mesosphere from satellite re-entry"
 type: software
 abstract: >-
-  Reentry and ablation model that estimates how much aluminium a satellite
-  vaporizes during atmospheric entry and at which altitudes it is injected,
+  Re-entry and ablation model that estimates how much aluminium a satellite
+  evaporates during atmospheric entry and at which altitudes it is injected,
   with boiling at the local stagnation pressure, temperature-dependent
-  emissivity of oxidized and bare aluminium, and automated checks that keep
+  emissivity of oxidised and bare aluminium, and automated checks that keep
   the reported numbers in sync with the code.
 authors:
   - family-names: Orazbay
